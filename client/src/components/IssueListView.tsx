@@ -7,6 +7,7 @@ import { QuickEditButton } from './inline/QuickEditButton';
 import { usePrefetchIssue } from '../hooks/useRedmine';
 import { useKeyboardTriage, type Triage } from '../hooks/useKeyboardTriage';
 import { TriageLayer } from './inline/TriageLayer';
+import { IssueListSkeleton } from './Skeletons';
 
 /* ── Status badge color ── */
 function statusColor(name: string): string {
@@ -80,7 +81,7 @@ function IssueRow({
         />
 
         {/* Tracker */}
-        <span className="text-xs font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded flex-shrink-0">
+        <span className="text-xs font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full flex-shrink-0">
           {issue.tracker.name}
         </span>
 
@@ -265,12 +266,7 @@ export function IssueListView({
   });
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-48 text-slate-500 gap-2">
-        <RefreshCw size={18} className="animate-spin" />
-        <span>Carregando...</span>
-      </div>
-    );
+    return <IssueListSkeleton />;
   }
 
   return (

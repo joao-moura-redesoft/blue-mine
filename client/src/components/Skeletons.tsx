@@ -64,6 +64,42 @@ export function KanbanBoardSkeleton() {
   );
 }
 
+// Silhueta da lista agrupada por status (IssueListView) — toolbar + grupos de linhas.
+export function IssueListSkeleton() {
+  const groups = [3, 2, 4];
+  return (
+    <div className="flex flex-col gap-3" aria-hidden="true">
+      {/* Toolbar (busca + contador) */}
+      <div className="flex items-center gap-2">
+        <SkeletonBox className="h-8 w-full max-w-sm rounded-lg" />
+        <SkeletonBox className="h-4 w-16 ml-auto" />
+        <SkeletonBox className="h-7 w-7 rounded-lg" />
+      </div>
+      {groups.map((rows, gi) => (
+        <div
+          key={gi}
+          className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden"
+        >
+          <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-800/50 flex items-center gap-2">
+            <SkeletonBox className="h-4 w-32" />
+            <SkeletonBox className="h-4 w-6 rounded-full" />
+          </div>
+          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            {Array.from({ length: rows }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 px-4 py-3">
+                <SkeletonBox className="h-3 w-10" />
+                <SkeletonBox className="h-4 flex-1 max-w-md" />
+                <SkeletonBox className="h-5 w-20 rounded-full ml-auto" />
+                <SkeletonBox className="h-6 w-6 rounded-full" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Card de estatística do Dashboard em esqueleto.
 function StatCardSkeleton() {
   return (
