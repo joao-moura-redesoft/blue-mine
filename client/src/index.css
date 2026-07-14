@@ -3,8 +3,19 @@
 @tailwind utilities;
 
 @layer base {
+  html {
+    /* Rendering premium da Inter: subpixel + kerning/ligaturas contextuais. */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
   body {
     @apply bg-slate-100 text-slate-900 antialiased;
+    font-feature-settings:
+      'cv02',
+      'cv03',
+      'cv04',
+      'cv11';
   }
   * {
     @apply box-border;

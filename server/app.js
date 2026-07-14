@@ -50,9 +50,9 @@ function buildApp() {
   const cspDirectives = {
     defaultSrc: ["'self'"],
     scriptSrc: ["'self'", 'https:'], // Jitsi external_api (domínio configurável)
-    styleSrc: ["'self'", "'unsafe-inline'"], // estilos inline do React/libs
+    styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'], // estilos inline do React/libs + Google Fonts
     imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-    fontSrc: ["'self'", 'data:'],
+    fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'], // fontes locais + Inter (Google Fonts)
     connectSrc: ["'self'", 'https:', 'wss:'], // /api, SSE, Jitsi (wss)
     mediaSrc: ["'self'", 'blob:', 'data:'], // áudio/voz (object URLs)
     frameSrc: ["'self'", 'https:'], // Jitsi + viewer.diagrams.net
