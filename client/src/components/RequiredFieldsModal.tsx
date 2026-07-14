@@ -113,7 +113,7 @@ export function RequiredFieldsModal({
           <button
             onClick={handleSubmit}
             disabled={!allFilled || saving}
-            className="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors flex items-center gap-1.5"
+            className="px-3 py-1.5 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-all duration-200 flex items-center gap-1.5"
           >
             {saving && <Loader2 size={13} className="animate-spin" />}{' '}
             {submitLabel ?? 'Salvar e mudar status'}

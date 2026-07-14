@@ -192,7 +192,7 @@ export function TimesheetView({ onIssueClick }: Props) {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setCreatingOn(todayKey)}
-            className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors"
+            className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 text-white font-medium transition-all duration-200"
           >
             <Plus size={15} /> Apontar horas
           </button>
@@ -238,7 +238,7 @@ export function TimesheetView({ onIssueClick }: Props) {
           <button
             onClick={() => q.refetch()}
             disabled={q.isFetching}
-            className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-medium"
+            className="text-xs px-3 py-1.5 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-40 text-white font-medium"
           >
             {q.isFetching ? 'Tentando…' : 'Tentar de novo'}
           </button>

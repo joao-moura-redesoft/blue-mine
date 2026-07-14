@@ -412,7 +412,7 @@ function UserProfilePopup({
                 onOpenDM(actorId);
                 onClose();
               }}
-              className="mt-3 w-full flex items-center justify-center gap-2 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-xl transition-colors"
+              className="mt-3 w-full flex items-center justify-center gap-2 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 text-white text-sm font-medium rounded-xl transition-all duration-200"
             >
               <MessageSquare size={14} /> Mensagem Direta
             </button>
@@ -736,7 +736,7 @@ function TalkAudio({
         className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-colors disabled:opacity-50 ${
           isMe
             ? 'bg-white text-blue-600 hover:bg-blue-50'
-            : 'bg-blue-600 text-white hover:bg-blue-700'
+            : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40'
         }`}
       >
         {playing ? <Pause size={14} /> : <Play size={14} className="ml-0.5" />}
@@ -1129,7 +1129,7 @@ function CallCard({ room, isMe }: { room: string; isMe: boolean }) {
               : 'bg-slate-100 text-slate-400'
             : isMe
               ? 'bg-white text-blue-600 hover:bg-blue-50'
-              : 'bg-blue-600 text-white hover:bg-blue-700'
+              : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40'
         }`}
       >
         <Video size={12} /> {here ? 'Na chamada' : 'Entrar'}
@@ -2149,7 +2149,7 @@ function MessageInput({
             onClick={sendVoice}
             disabled={uploading}
             title="Enviar áudio"
-            className="p-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-full transition-colors flex-shrink-0"
+            className="p-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-40 text-white rounded-full transition-all duration-200 flex-shrink-0"
           >
             <Send size={12} />
           </button>
@@ -2215,7 +2215,7 @@ function MessageInput({
             <button
               onClick={submit}
               disabled={isPending || uploading}
-              className="p-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-full transition-colors flex-shrink-0"
+              className="p-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-40 text-white rounded-full transition-all duration-200 flex-shrink-0"
             >
               <Send size={12} />
             </button>
@@ -3439,7 +3439,7 @@ function GroupInfoPanel({
                   onClick={() => avatarRef.current?.click()}
                   disabled={busy}
                   title="Trocar imagem do grupo"
-                  className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center shadow-md"
+                  className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 text-white flex items-center justify-center shadow-md"
                 >
                   <Camera size={13} />
                 </button>
@@ -3465,7 +3465,7 @@ function GroupInfoPanel({
               <button
                 onClick={saveName}
                 disabled={busy}
-                className="p-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                className="p-1.5 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40"
               >
                 <Check size={13} />
               </button>
@@ -4199,7 +4199,7 @@ function MyStatusMenu({ onClose }: { onClose: () => void }) {
           <button
             onClick={saveMsg}
             disabled={busy}
-            className="flex-1 py-1.5 text-[11px] bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
+            className="flex-1 py-1.5 text-[11px] bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 text-white rounded-lg font-medium transition-all duration-200"
           >
             Salvar
           </button>

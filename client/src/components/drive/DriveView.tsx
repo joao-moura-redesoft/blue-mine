@@ -666,7 +666,7 @@ export function DriveView() {
               <button
                 onClick={() => fileRef.current?.click()}
                 title="Enviar arquivos"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 text-white transition-all duration-200"
               >
                 <Upload size={15} /> <span className="hidden md:inline">Enviar</span>
               </button>
@@ -1476,7 +1476,7 @@ function ModalActions({
       <button
         onClick={onConfirm}
         disabled={busy || disabled}
-        className={`px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-colors disabled:opacity-40 ${danger ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}
+        className={`px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-all duration-200 disabled:opacity-40 ${danger ? 'bg-red-600 hover:bg-red-700' : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40'}`}
       >
         {busy ? '…' : confirmLabel}
       </button>

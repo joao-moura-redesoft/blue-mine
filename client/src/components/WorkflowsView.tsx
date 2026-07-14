@@ -102,7 +102,7 @@ export function WorkflowsView(_props: { onIssueClick?: (id: number) => void } = 
           <button
             onClick={() => setGallery(true)}
             disabled={create.isPending}
-            className="flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+            className="flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-md bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-50"
           >
             <Plus size={16} /> Nova automação
           </button>
@@ -127,7 +127,7 @@ export function WorkflowsView(_props: { onIssueClick?: (id: number) => void } = 
           </p>
           <button
             onClick={() => setGallery(true)}
-            className="mt-4 flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700"
+            className="mt-4 flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-md bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40"
           >
             <Plus size={15} /> Ver receitas
           </button>
@@ -240,7 +240,7 @@ function ImportModal({
             <button
               onClick={submit}
               disabled={busy || !text.trim()}
-              className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+              className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-md bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-50"
             >
               <Upload size={14} /> Importar
             </button>

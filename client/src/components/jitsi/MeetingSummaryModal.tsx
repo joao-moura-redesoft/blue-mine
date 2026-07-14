@@ -199,7 +199,7 @@ export function MeetingSummaryModal({ isOpen, onClose, audioBlob, call }: Props)
             <button
               onClick={handlePostNote}
               disabled={isPosting || posted || !targetIssueId || !summary}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-50 transition-all duration-200"
             >
               {posted ? (
                 <CheckCircle size={16} />

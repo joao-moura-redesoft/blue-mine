@@ -249,7 +249,7 @@ export function TimeEntryDialog({ entry, defaultDate, onClose, onIssueClick }: P
             <button
               onClick={handleSave}
               disabled={!valid || busy}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-lg font-medium transition-colors"
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-40 text-white rounded-lg font-medium transition-all duration-200"
             >
               {create.isPending || update.isPending ? (
                 <>

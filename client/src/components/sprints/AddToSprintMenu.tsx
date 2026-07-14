@@ -24,7 +24,7 @@ export function AddToSprintMenu({
         title="Adicionar à sprint"
         className={
           label
-            ? 'flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-md bg-blue-600 text-white hover:bg-blue-700'
+            ? 'flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-md bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40'
             : 'flex items-center gap-0.5 text-[11px] font-medium px-1.5 py-1 rounded-md text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30'
         }
       >

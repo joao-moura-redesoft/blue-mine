@@ -97,7 +97,7 @@ export function UpdateBanner() {
           <button
             onClick={apply}
             disabled={phase === 'applying'}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-50 rounded-lg"
           >
             {phase === 'applying' ? (
               <Loader2 size={13} className="animate-spin" />
@@ -110,7 +110,7 @@ export function UpdateBanner() {
           <button
             onClick={download}
             disabled={phase === 'downloading'}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-50 rounded-lg"
           >
             {phase === 'downloading' ? (
               <Loader2 size={13} className="animate-spin" />

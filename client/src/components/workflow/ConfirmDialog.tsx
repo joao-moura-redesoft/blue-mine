@@ -59,7 +59,7 @@ export function ConfirmDialog({
               onClose();
             }}
             className={`text-sm font-medium px-3 py-1.5 rounded-md text-white ${
-              danger ? 'bg-rose-600 hover:bg-rose-700' : 'bg-blue-600 hover:bg-blue-700'
+              danger ? 'bg-rose-600 hover:bg-rose-700' : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40'
             }`}
           >
             {confirmLabel}

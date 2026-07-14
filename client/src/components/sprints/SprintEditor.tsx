@@ -82,7 +82,7 @@ export function SprintEditor({
         </div>
         <button
           onClick={onClose}
-          className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-blue-600 text-white hover:bg-blue-700"
+          className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40"
         >
           <Check size={13} /> Pronto
         </button>

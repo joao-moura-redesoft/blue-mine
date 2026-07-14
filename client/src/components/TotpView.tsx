@@ -200,7 +200,7 @@ export function TotpView() {
             setShowForm((v) => !v);
             setFormError(null);
           }}
-          className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+          className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 text-white text-sm font-medium rounded-lg transition-all duration-200"
         >
           <Plus size={15} />
           Adicionar
@@ -270,7 +270,7 @@ export function TotpView() {
             <button
               onClick={addAccount}
               disabled={adding}
-              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+              className="px-4 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-all duration-200"
             >
               {adding ? 'Verificando…' : 'Salvar'}
             </button>

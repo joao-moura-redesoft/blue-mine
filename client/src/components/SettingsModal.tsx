@@ -560,7 +560,7 @@ function NextcloudSection() {
                     <button
                       onClick={startFlow}
                       disabled={!url.trim()}
-                      className="flex items-center gap-1.5 px-3 py-2 text-xs bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-lg font-medium transition-colors whitespace-nowrap"
+                      className="flex items-center gap-1.5 px-3 py-2 text-xs bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-40 text-white rounded-lg font-medium transition-all duration-200 whitespace-nowrap"
                     >
                       <LogIn size={11} /> Entrar
                     </button>
@@ -616,7 +616,7 @@ function NextcloudSection() {
                   <button
                     onClick={saveManual}
                     disabled={saving || !url.trim() || !mUser.trim() || !mToken.trim()}
-                    className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-lg font-medium transition-colors"
+                    className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-40 text-white rounded-lg font-medium transition-all duration-200"
                   >
                     {saving ? (
                       <Loader2 size={12} className="animate-spin" />
@@ -779,7 +779,7 @@ function ADCredsSection() {
               <button
                 onClick={save}
                 disabled={!user.trim() || !password || busy}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-lg font-medium transition-colors"
+                className="flex items-center gap-1.5 px-3 py-2 text-xs bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-40 text-white rounded-lg font-medium transition-all duration-200"
               >
                 {saved ? (
                   <>
@@ -876,7 +876,7 @@ function MailSection() {
               <button
                 onClick={test}
                 disabled={testState === 'testing'}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-lg font-medium transition-colors"
+                className="flex items-center gap-1.5 px-3 py-2 text-xs bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-40 text-white rounded-lg font-medium transition-all duration-200"
               >
                 {testState === 'testing' ? (
                   <Loader2 size={11} className="animate-spin" />
@@ -1036,7 +1036,7 @@ function MailPersonalization() {
             <div className="flex items-center gap-2">
               <button
                 onClick={saveTemplate}
-                className="flex items-center gap-1 px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
+                className="flex items-center gap-1 px-3 py-1.5 text-xs bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 text-white rounded-lg font-medium transition-all duration-200"
               >
                 <Check size={11} /> Salvar modelo
               </button>

@@ -112,7 +112,7 @@ export function SavedFiltersBar({ currentFilter, onApply }: Props) {
           <button
             onClick={handleSave}
             disabled={!name.trim()}
-            className="text-xs px-2.5 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-lg transition-colors"
+            className="text-xs px-2.5 py-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-40 text-white rounded-lg transition-all duration-200"
           >
             Salvar
           </button>

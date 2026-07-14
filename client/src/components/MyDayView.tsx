@@ -123,7 +123,7 @@ function Pomodoro() {
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => setRunning((r) => !r)}
-            className="w-9 h-9 flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+            className="w-9 h-9 flex items-center justify-center rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 text-white transition-all duration-200"
             title={running ? 'Pausar' : 'Iniciar'}
           >
             {running ? <Pause size={16} /> : <Play size={16} className="fill-current" />}
@@ -340,7 +340,7 @@ export function MyDayView({ onIssueClick }: { onIssueClick: (id: number) => void
         <div className="relative" ref={pickerRef}>
           <button
             onClick={() => setShowPicker((v) => !v)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 text-white text-sm font-medium rounded-lg transition-all duration-200"
           >
             <Plus size={15} /> Adicionar tarefas
           </button>

@@ -524,7 +524,7 @@ export function CommentComposer({
           <button
             onClick={submit}
             disabled={(!text.trim() && files.length === 0) || sending}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-all duration-200"
           >
             <Send size={14} />
             {sending ? 'Enviando…' : 'Enviar'}

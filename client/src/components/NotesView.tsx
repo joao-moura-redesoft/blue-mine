@@ -1144,7 +1144,7 @@ export function NotesView({
               <button
                 onClick={() => setShowTemplates((v) => !v)}
                 title="Nova nota"
-                className="p-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                className="p-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 text-white rounded-lg transition-all duration-200"
               >
                 <Plus size={15} />
               </button>
@@ -1357,7 +1357,7 @@ export function NotesView({
             <p className="text-sm">Selecione uma nota ou crie uma nova.</p>
             <button
               onClick={() => handleNew()}
-              className="mt-3 inline-flex items-center gap-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-3 py-1.5 transition-colors"
+              className="mt-3 inline-flex items-center gap-1.5 text-xs bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 text-white rounded-lg px-3 py-1.5 transition-all duration-200"
             >
               <Plus size={14} /> Nova nota
             </button>

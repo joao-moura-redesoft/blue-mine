@@ -320,7 +320,7 @@ export function AssistantView({ onIssueClick }: { onIssueClick?: (id: number) =>
         <button
           onClick={() => send(input)}
           disabled={!input.trim() || loading}
-          className="p-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-xl transition-colors flex-shrink-0"
+          className="p-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-40 text-white rounded-xl transition-all duration-200 flex-shrink-0"
         >
           {loading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
         </button>

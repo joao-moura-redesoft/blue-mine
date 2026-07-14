@@ -439,7 +439,7 @@ export function SprintsView({ onIssueClick }: Props) {
           </div>
           <button
             onClick={handleNewBoard}
-            className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+            className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40"
           >
             <FolderPlus size={15} /> Novo projeto
           </button>

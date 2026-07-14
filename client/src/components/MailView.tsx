@@ -225,7 +225,7 @@ function MailViewInner() {
         </div>
         <button
           onClick={() => setCompose({ to: '', subject: '', bodyHtml: signatureSeed() })}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 text-white rounded-lg transition-all duration-200"
         >
           <PenSquare size={14} /> Escrever
         </button>
@@ -882,7 +882,7 @@ function ComposeModal({
               sendMut.mutate();
             }}
             disabled={!to.trim() || busy || uploading > 0}
-            className="flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-50 text-white rounded-lg transition-all duration-200"
           >
             {sendMut.isPending ? (
               <Loader2 size={14} className="animate-spin" />

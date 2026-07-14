@@ -230,7 +230,7 @@ function StandupModal({
           <div className="flex items-center gap-2">
             <button
               onClick={copy}
-              className="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+              className="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 transition-all duration-200"
             >
               {copied ? <Check size={13} /> : <Copy size={13} />}
               {copied ? 'Copiado!' : 'Copiar'}

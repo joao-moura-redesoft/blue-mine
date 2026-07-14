@@ -2513,7 +2513,7 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                             });
                             setEditingDescription(null);
                           }}
-                          className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg"
+                          className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 text-white text-xs font-medium rounded-lg"
                         >
                           <Check size={12} /> Salvar
                         </button>
@@ -2684,7 +2684,7 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                                                 setEditingJournal(null);
                                               }}
                                               disabled={updateJournal.isPending}
-                                              className="flex items-center gap-1 px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg"
+                                              className="flex items-center gap-1 px-3 py-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-50 text-white text-xs font-medium rounded-lg"
                                             >
                                               <Check size={12} /> Salvar
                                             </button>
@@ -2789,7 +2789,7 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                                         setEditingJournal(null);
                                       }}
                                       disabled={updateJournal.isPending}
-                                      className="flex items-center gap-1 px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg"
+                                      className="flex items-center gap-1 px-3 py-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-50 text-white text-xs font-medium rounded-lg"
                                     >
                                       <Check size={12} /> Salvar
                                     </button>

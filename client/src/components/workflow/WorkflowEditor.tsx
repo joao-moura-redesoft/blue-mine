@@ -513,7 +513,7 @@ function EditorInner({ workflow, onBack }: { workflow: Workflow; onBack: () => v
         <button
           onClick={() => save().then(() => showFlash(true, 'Salvo'))}
           disabled={update.isPending || !dirty}
-          className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+          className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-md bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-50"
         >
           <Save size={15} />
           {dirty ? 'Salvar' : 'Salvo'}

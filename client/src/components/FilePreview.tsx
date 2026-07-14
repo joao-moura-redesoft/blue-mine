@@ -205,7 +205,7 @@ function FallbackPreview({
         )}
         <button
           onClick={onDownload}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-xs"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 text-xs"
         >
           <Download size={13} /> Baixar
         </button>
