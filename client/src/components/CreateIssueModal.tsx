@@ -591,7 +591,7 @@ export function CreateIssueModal({
             <button
               type="submit"
               disabled={createIssue.isPending || uploading || !subject.trim() || !projectId}
-              className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 disabled:opacity-50 disabled:shadow-none disabled:hover:scale-100 text-white text-sm font-semibold rounded-lg transition-all duration-200 hover:scale-[1.02] active:scale-95"
             >
               {uploading || createIssue.isPending ? (
                 <Loader2 size={15} className="animate-spin" />

@@ -548,12 +548,12 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
       title={sidebarCollapsed ? tab.label : undefined}
       className={({
         isActive,
-      }) => `w-full flex items-center gap-2.5 rounded-lg transition-colors text-sm text-left relative
+      }) => `w-full flex items-center gap-2.5 rounded-lg transition-all duration-200 text-sm text-left relative active:scale-[0.98]
         ${sidebarCollapsed ? 'justify-center px-2 py-2.5' : 'px-3 py-2'}
         ${
           isActive
-            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 font-medium'
-            : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-100'
+            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 font-semibold shadow-sm shadow-blue-500/5'
+            : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-100 hover:translate-x-0.5'
         }`}
     >
       {({ isActive }) => (
@@ -591,7 +591,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
     <div className="h-screen flex overflow-hidden bg-slate-50 dark:bg-slate-950">
       {/* ── Sidebar ── */}
       <aside
-        className={`flex flex-col bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-700 flex-shrink-0 transition-all duration-200 ${sidebarCollapsed ? 'w-[52px]' : 'w-[220px]'}`}
+        className={`flex flex-col bg-white/80 dark:bg-slate-900/70 backdrop-blur-xl border-r border-slate-200/70 dark:border-slate-700/60 flex-shrink-0 transition-all duration-200 ${sidebarCollapsed ? 'w-[52px]' : 'w-[220px]'}`}
       >
         {/* Logo */}
         <div
@@ -743,7 +743,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
       {/* ── Content ── */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Topbar */}
-        <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 px-4 py-2 flex items-center gap-3 flex-shrink-0">
+        <header className="bg-white/70 dark:bg-slate-900/60 backdrop-blur-xl border-b border-slate-200/70 dark:border-slate-700/60 px-4 py-2 flex items-center gap-3 flex-shrink-0 z-10">
           {/* Search */}
           <div className="flex-1 min-w-0">
             <GlobalSearch onSelectIssue={openIssue} />
@@ -760,7 +760,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
                 <ChevronDown size={14} className="flex-shrink-0" />
               </button>
               {showProjectMenu && (
-                <div className="absolute right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-20 min-w-52 py-1 max-h-80 overflow-y-auto scrollbar-thin">
+                <div className="absolute right-0 top-full mt-1 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border border-slate-200/80 dark:border-slate-700/70 rounded-lg shadow-xl shadow-slate-900/5 z-20 min-w-52 py-1 max-h-80 overflow-y-auto scrollbar-thin">
                   <button
                     onClick={() => {
                       setSelectedProject(undefined);
@@ -841,7 +841,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
             </button>
 
             {showNotifications && (
-              <div className="absolute right-0 top-full mt-2 w-80 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+              <div className="absolute right-0 top-full mt-2 w-80 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border border-slate-200/80 dark:border-slate-700/70 rounded-xl shadow-2xl z-50 overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
                   <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">
                     {notifications.length === 0

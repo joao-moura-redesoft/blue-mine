@@ -511,10 +511,10 @@ export function IssueCard({
       }}
       className={`
         relative bg-white rounded-lg border p-3 cursor-pointer select-none group
-        transition-all duration-150
+        transition-all duration-200
         ${focused ? 'border-blue-500 ring-2 ring-blue-500 ring-offset-1' : selected ? 'border-blue-500 ring-2 ring-blue-300' : 'border-slate-200'}
         ${isDragging && !isDragOverlay ? 'opacity-40 scale-95' : ''}
-        ${isDragOverlay ? 'shadow-2xl rotate-1 border-blue-300 scale-105' : 'shadow-sm hover:shadow-md hover:border-blue-300'}
+        ${isDragOverlay ? 'shadow-2xl rotate-1 border-blue-300 scale-105' : 'shadow-sm hover:shadow-lg hover:shadow-slate-900/5 hover:border-blue-300 hover:-translate-y-0.5 active:scale-[0.99]'}
       `}
     >
       {/* Checkbox inline — só no modo seleção */}
@@ -555,12 +555,12 @@ export function IssueCard({
 
       {/* Tracker + Prioridade */}
       <div className="flex items-start justify-between gap-2 mb-2">
-        <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+        <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
           <Tag size={10} />
           {issue.tracker.name}
         </span>
         <span
-          className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded ${PRIORITY_COLORS[issue.priority.name] ?? 'bg-slate-100 text-slate-600'}`}
+          className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${PRIORITY_COLORS[issue.priority.name] ?? 'bg-slate-100 text-slate-600'}`}
         >
           <span
             className={`w-1.5 h-1.5 rounded-full ${PRIORITY_DOTS[issue.priority.name] ?? 'bg-slate-400'}`}
@@ -570,8 +570,8 @@ export function IssueCard({
       </div>
 
       {/* Título */}
-      <p className="text-sm font-medium text-slate-800 leading-snug mb-1.5 line-clamp-2">
-        #{issue.id} — {issue.subject}
+      <p className="text-sm font-semibold text-slate-800 leading-snug mb-1.5 line-clamp-2 tracking-[-0.01em]">
+        <span className="font-medium text-slate-400">#{issue.id}</span> {issue.subject}
       </p>
 
       {/* Projeto */}
