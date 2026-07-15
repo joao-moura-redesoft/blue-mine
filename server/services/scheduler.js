@@ -99,6 +99,7 @@ async function fire(item, subscriptions, sendPush) {
     tag: `talk-reminder-${item.id}`,
     url: `/?talkRoom=${item.roomToken}`,
     talkToken: item.roomToken,
+    alwaysShow: true, // lembrete deve aparecer mesmo com o app aberto (sem polling em 1º plano)
   };
   if (recs.length === 0) {
     // Sem dispositivo inscrito: nada a entregar agora. Não relança para não repetir.

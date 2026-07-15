@@ -54,6 +54,7 @@ import { useJitsi } from './jitsi/JitsiContext';
 import { CreateIssueModal } from './CreateIssueModal';
 import { FilePreviewModal, isPreviewable } from './FilePreview';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
+import { useBrowserNotifications } from '../hooks/useBrowserNotifications';
 import { pcmToMp3, pcmToWav } from '../utils/encodeMp3';
 import { makeTalkRoom, jitsiRoomUrl, callRoomFromText } from '../utils/jitsiConfig';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -1514,6 +1515,7 @@ function ReminderDialog({
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
   const [custom, setCustom] = useState('');
+  const { permission, requestPermission } = useBrowserNotifications();
   const quote = `${msg.actorDisplayName.split(' ')[0]}: ${resolveMessageText(msg)
     .replace(/\n+/g, ' ')
     .slice(0, 160)}`;
@@ -1603,9 +1605,34 @@ function ReminderDialog({
                   {busy ? <Loader2 size={13} className="animate-spin" /> : 'OK'}
                 </button>
               </div>
-              <p className="text-[10px] text-slate-400 leading-snug">
-                O lembrete chega como notificação — mantenha as notificações do app ativadas.
-              </p>
+              {permission === 'granted' ? (
+                <p className="text-[10px] text-slate-400 leading-snug">
+                  O lembrete chega como notificação, mesmo com o app fechado.
+                </p>
+              ) : permission === 'default' ? (
+                <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">
+                  <AlertCircle size={13} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <p className="text-[10px] text-amber-700 leading-snug">
+                      As notificações estão desativadas — sem elas o lembrete não será entregue.
+                    </p>
+                    <button
+                      onClick={() => requestPermission()}
+                      className="mt-1 text-[11px] font-medium text-blue-600 hover:underline"
+                    >
+                      Ativar notificações
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-2">
+                  <AlertCircle size={13} className="text-rose-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-[10px] text-rose-600 leading-snug">
+                    As notificações estão <b>bloqueadas</b> no navegador. O lembrete só será
+                    entregue após você reativá-las nas permissões do site.
+                  </p>
+                </div>
+              )}
               {error && <p className="text-[11px] text-red-500">{error}</p>}
             </>
           )}

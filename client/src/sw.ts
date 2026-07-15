@@ -32,6 +32,9 @@ interface PushPayload {
   url?: string;
   issueId?: number;
   talkToken?: string;
+  // Notificações que devem aparecer MESMO com o app aberto (ex.: lembretes
+  // agendados — não têm polling em primeiro plano que as exiba de outra forma).
+  alwaysShow?: boolean;
 }
 
 self.addEventListener('push', (event: PushEvent) => {
@@ -46,7 +49,8 @@ self.addEventListener('push', (event: PushEvent) => {
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       // App aberto (aberto ou minimizado) → deixa o app cuidar; não duplica.
-      if (clientList.length > 0) return;
+      // Exceção: alwaysShow (lembretes) — não há polling em 1º plano que os exiba.
+      if (clientList.length > 0 && !payload.alwaysShow) return;
       return self.registration.showNotification(payload.title, {
         body: payload.body,
         icon: '/icon-192.png',
