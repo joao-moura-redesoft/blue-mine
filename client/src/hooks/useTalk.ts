@@ -44,9 +44,28 @@ export function useTalkRooms() {
 }
 
 export function useTalkMessages(token: string | null) {
+  const qc = useQueryClient();
   return useQuery({
     queryKey: ['talk-messages', token],
-    queryFn: () => fetchMessages(token!),
+    queryFn: async () => {
+      const fresh = await fetchMessages(token!);
+      // Preserva bolhas otimistas (enviando/falhou) ainda ausentes no servidor. Sem isto,
+      // um refetch de fundo (intervalo de 30s, foco da aba, staleTime) substituiria o cache
+      // pela lista do servidor e apagaria a mensagem em TRÂNSITO de uma conexão lenta — o
+      // usuário via a bolha "sumir" mesmo com o POST a caminho (que no fim entrega). Também
+      // mantém a bolha "falhou" viva para o botão de reenviar não desaparecer.
+      const prev = qc.getQueryData<TalkMessage[]>(['talk-messages', token]) ?? [];
+      const pending = prev.filter((m) => m._status === 'sending' || m._status === 'failed');
+      if (pending.length === 0) return fresh;
+      // A mensagem real já chegou? (mesmo autor + texto) → descarta a bolha otimista.
+      // Bônus: se o servidor recebeu mas a resposta falhou (timeout), a bolha "falhou"
+      // some sozinha no próximo refetch, pois a mensagem real aparece em `fresh`.
+      const freshKeys = new Set(fresh.map((m) => `${m.actorId} ${m.message}`));
+      const keep = pending.filter(
+        (p) => !freshKeys.has(`${p.actorId} ${p._clientText ?? p.message}`),
+      );
+      return [...keep, ...fresh];
+    },
     enabled: !!token && talkEnabled(),
     refetchInterval: 30_000, // SSE handles real-time; this is just a sync fallback
     staleTime: 4_000,
@@ -95,12 +114,18 @@ export function useSendMessage(token: string | null, myId = '', myName = '') {
       qc.setQueryData(['talk-messages', token], (old: TalkMessage[] = []) => [temp, ...old]);
       return { clientId };
     },
-    // Falhou: marca a bolha como erro (permanece para reenvio)
+    // Falhou: marca a bolha como erro (permanece para reenvio). MAS numa rede instável o
+    // POST costuma ENTREGAR a mensagem e só perder a resposta — então dispara um refetch de
+    // reconciliação: se a mensagem real aparecer no servidor, o merge do queryFn descarta
+    // esta bolha "falhou" e mostra a mensagem de verdade (sem reenvio manual, que duplicaria).
+    // Se realmente não foi entregue, o refetch não a traz e a bolha "falhou" permanece.
     onError: (_e, _v, ctx) => {
       if (!ctx) return;
       qc.setQueryData(['talk-messages', token], (old: TalkMessage[] = []) =>
         old.map((m) => (m.id === ctx.clientId ? { ...m, _status: 'failed' as const } : m)),
       );
+      qc.invalidateQueries({ queryKey: ['talk-messages', token] });
+      qc.invalidateQueries({ queryKey: ['talk-rooms'] });
     },
     // Sucesso: troca a bolha temporária pela mensagem real (sem flicker nem duplicata)
     onSuccess: (data, _v, ctx) => {
@@ -113,7 +138,11 @@ export function useSendMessage(token: string | null, myId = '', myName = '') {
           return old.map((m) => (m.id === ctx.clientId ? data : m));
         });
       }
-      qc.invalidateQueries({ queryKey: ['talk-messages', token] });
+      // NÃO invalidar ['talk-messages'] aqui: o setQueryData acima já inseriu a mensagem
+      // real (resposta do POST) e o SSE cobre o que vier depois. Um refetch imediato corre
+      // contra o read-after-write do Nextcloud — o GET às vezes volta SEM a mensagem recém
+      // enviada e, ao substituir o cache, ela "pisca e some". O refetchInterval (30s) e o
+      // SSE reconciliam sem esse risco.
       qc.invalidateQueries({ queryKey: ['talk-rooms'] });
     },
   });
@@ -132,6 +161,26 @@ export function useDeleteMessage(token: string | null) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (messageId: number) => deleteMessage(token!, messageId),
+    // Exclusão otimista: marca a mensagem como comment_deleted na hora. O filtro de
+    // visibilidade (messageType === 'comment') esconde comment_deleted, então a bolha
+    // some imediatamente — sem depender do refetch de reconciliação, que numa conexão
+    // lenta pode demorar/falhar e deixava a mensagem "excluída" ainda visível na conversa.
+    onMutate: async (messageId) => {
+      await qc.cancelQueries({ queryKey: ['talk-messages', token] });
+      const prev = qc.getQueryData<TalkMessage[]>(['talk-messages', token]);
+      qc.setQueryData<TalkMessage[]>(['talk-messages', token], (old = []) =>
+        old.map((m) =>
+          m.id === messageId
+            ? { ...m, messageType: 'comment_deleted', systemMessage: 'message_deleted' }
+            : m,
+        ),
+      );
+      return { prev };
+    },
+    // Reverte se o Talk recusar (ex.: fora da janela de tempo permitida para excluir).
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(['talk-messages', token], ctx.prev);
+    },
     onSettled: () => qc.invalidateQueries({ queryKey: ['talk-messages', token] }),
   });
 }
@@ -290,8 +339,7 @@ export function useTalkSSE(token: string | null, initialMessageId: number) {
           const addedKeys = new Set(toAdd.map((m) => `${m.actorId} ${m.message}`));
           const base = old.some((m) => m._status === 'sending')
             ? old.filter(
-                (m) =>
-                  m._status !== 'sending' || !addedKeys.has(`${m.actorId} ${m.message}`),
+                (m) => m._status !== 'sending' || !addedKeys.has(`${m.actorId} ${m.message}`),
               )
             : old;
           return [...toAdd, ...base];

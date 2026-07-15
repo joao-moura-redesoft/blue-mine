@@ -3259,7 +3259,10 @@ function ChatWindow({
   // Combina recentes + antigas, deduplica por ID e ordena newest-first.
   // Ordenação explícita garante exibição correta independente da ordem da API.
   const allMessages = useMemo(() => {
-    const byId = new Map([...messages, ...olderMessages].map((m) => [m.id, m]));
+    // `olderMessages` primeiro para que `messages` (query viva, refetch/SSE) VENÇA em ids
+    // duplicados — senão o histórico paginado (estático) mascararia edições, exclusões e
+    // reações da mensagem ao vivo.
+    const byId = new Map([...olderMessages, ...messages].map((m) => [m.id, m]));
     return [...byId.values()].sort((a, b) => b.id - a.id);
   }, [messages, olderMessages]);
 
@@ -3337,11 +3340,23 @@ function ChatWindow({
     if (!lastMsgId) return;
 
     const tryMarkRead = () => {
-      if (!document.hidden) {
-        markMessagesRead(room.token, lastMsgId)
-          .then(() => qc.invalidateQueries({ queryKey: ['talk-rooms'] }))
-          .catch(() => {});
-      }
+      if (document.hidden) return;
+      markMessagesRead(room.token, lastMsgId)
+        .then(async () => {
+          // Zera o badge desta sala IMEDIATAMENTE, sem esperar o /rooms recalcular.
+          // Sem isto o "não lido" às vezes persiste: um poll de /rooms que começou
+          // ANTES do POST /read resolve depois com a contagem antiga e, por dedupe do
+          // React Query, sobrescreve o valor recém-zerado. cancelQueries descarta esse
+          // fetch em voo; o invalidate dispara um novo, já garantidamente pós-leitura.
+          await qc.cancelQueries({ queryKey: ['talk-rooms'] });
+          qc.setQueryData<TalkRoom[]>(['talk-rooms'], (old) =>
+            old?.map((r) =>
+              r.token === room.token ? { ...r, unreadMessages: 0, unreadMention: false } : r,
+            ),
+          );
+          qc.invalidateQueries({ queryKey: ['talk-rooms'] });
+        })
+        .catch(() => {});
     };
 
     tryMarkRead();
@@ -3952,7 +3967,12 @@ function ChatWindow({
                     setEditTarget(msg);
                     setReplyTo(null);
                   }}
-                  onDelete={(msg) => deleteMsg.mutate(msg.id)}
+                  onDelete={(msg) => {
+                    deleteMsg.mutate(msg.id);
+                    // A exclusão otimista atua na query viva; se a mensagem veio do
+                    // histórico paginado, remove-a daqui também para sumir na hora.
+                    setOlderMessages((prev) => prev.filter((m) => m.id !== msg.id));
+                  }}
                   onReact={(msgId, emoji, remove) =>
                     react.mutate({ messageId: msgId, reaction: emoji, remove })
                   }
