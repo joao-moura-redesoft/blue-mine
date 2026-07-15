@@ -13,7 +13,12 @@ interface Props {
   onClose: () => void;
 }
 
+// Tarefas fechadas ou canceladas não entram no standup/retrospectiva.
+const isCanceled = (i: Issue) => /cancel/i.test(i.status?.name || '');
+const isOpen = (i: Issue) => !i.status?.is_closed && !isCanceled(i);
+
 export function StandupModal({ issues, completedIssues = [], onClose }: Props) {
+  const openIssues = issues.filter(isOpen);
   const [mode, setMode] = useState<Mode>('daily');
   const [standup, setStandup] = useState('');
   const [loading, setLoading] = useState(false);
@@ -35,8 +40,8 @@ export function StandupModal({ issues, completedIssues = [], onClose }: Props) {
     try {
       const text =
         mode === 'daily'
-          ? await redmineApi.standup(issues)
-          : await redmineApi.weeklyDigest(issues, completedIssues);
+          ? await redmineApi.standup(openIssues)
+          : await redmineApi.weeklyDigest(openIssues, completedIssues);
       setStandup(text);
       setGenerated(true);
     } catch (err: unknown) {
@@ -55,7 +60,7 @@ export function StandupModal({ issues, completedIssues = [], onClose }: Props) {
   const hasKey = !!getAIKey();
 
   // Status summary para mostrar antes de gerar
-  const byStatus = issues.reduce<Record<string, number>>((acc, i) => {
+  const byStatus = openIssues.reduce<Record<string, number>>((acc, i) => {
     acc[i.status.name] = (acc[i.status.name] || 0) + 1;
     return acc;
   }, {});
@@ -105,7 +110,7 @@ export function StandupModal({ issues, completedIssues = [], onClose }: Props) {
           {/* Resumo das tarefas */}
           <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-3">
             <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">
-              {issues.length} tarefa{issues.length !== 1 ? 's' : ''} abertas
+              {openIssues.length} tarefa{openIssues.length !== 1 ? 's' : ''} abertas
               {mode === 'weekly' &&
                 completedIssues.length > 0 &&
                 ` · ${completedIssues.length} concluída${completedIssues.length !== 1 ? 's' : ''} recentes`}

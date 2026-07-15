@@ -258,6 +258,7 @@ function NoteEditor({
   onImportToLocal,
   allNotes,
   onSelectNote,
+  ncLinked,
 }: {
   note: Note;
   onIssueClick?: (id: number) => void;
@@ -267,6 +268,7 @@ function NoteEditor({
   onImportToLocal: (note: Note) => void;
   allNotes: Note[];
   onSelectNote: (id: string) => void;
+  ncLinked: boolean;
 }) {
   // Nota do Nextcloud (app Notes): modelo mais pobre (só corpo markdown), então
   // escondemos tags/cor/vínculo/checklist e roteamos o autosave para o endpoint NC.
@@ -575,7 +577,7 @@ function NoteEditor({
           <Copy size={14} />
         </button>
 
-        {/* Bridge: importar nota do Nextcloud para local, ou enviar local para o Nextcloud */}
+        {/* Bridge: importar nota do Nextcloud para local, ou publicar a nota local no Nextcloud */}
         {isNc ? (
           <button
             onClick={() => onImportToLocal(note)}
@@ -585,26 +587,29 @@ function NoteEditor({
             <DownloadCloud size={14} />
           </button>
         ) : (
-          <button
-            onClick={handlePushToNc}
-            disabled={pushState === 'pushing'}
-            title="Enviar para o Nextcloud (cria uma nota no QuickNotes)"
-            className={`p-1.5 rounded-md transition-colors disabled:opacity-50 ${
-              pushState === 'done'
-                ? 'text-green-500'
-                : pushState === 'error'
-                  ? 'text-red-500'
-                  : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-            }`}
-          >
-            {pushState === 'pushing' ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : pushState === 'done' ? (
-              <Check size={14} />
-            ) : (
-              <UploadCloud size={14} />
-            )}
-          </button>
+          ncLinked && (
+            <button
+              onClick={handlePushToNc}
+              disabled={pushState === 'pushing' || (!title.trim() && !body.trim())}
+              title="Publicar esta nota no Nextcloud (cria uma cópia no QuickNotes)"
+              className={`inline-flex items-center gap-1.5 text-xs font-medium rounded-lg px-2.5 py-1 transition-colors disabled:opacity-40 ${
+                pushState === 'done'
+                  ? 'bg-green-50 text-green-600 dark:bg-green-900/20'
+                  : pushState === 'error'
+                    ? 'bg-red-50 text-red-600 dark:bg-red-900/20'
+                    : 'text-sky-600 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/20 border border-sky-200 dark:border-sky-800'
+              }`}
+            >
+              {pushState === 'pushing' ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : pushState === 'done' ? (
+                <Check size={13} />
+              ) : (
+                <UploadCloud size={13} />
+              )}
+              {pushState === 'done' ? 'Publicado!' : pushState === 'error' ? 'Falhou' : 'Publicar'}
+            </button>
+          )
         )}
 
         {/* Cor — paleta local (chave) nas notas locais; hex do QuickNotes nas do NC */}
@@ -951,6 +956,7 @@ export function NotesView({
   const [sourceFilter, setSourceFilter] = useState<'all' | 'local' | 'nextcloud'>('all');
   const [pendingDelete, setPendingDelete] = useState<Note | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [ncNotice, setNcNotice] = useState<string | null>(null);
   const newBtnRef = useRef<HTMLDivElement>(null);
   const consumedSeed = useRef<number>(0);
   const consumedFocus = useRef<number>(0);
@@ -1058,15 +1064,21 @@ export function NotesView({
     createNote.mutate({ ...patch, id });
   };
 
-  // Cria uma nota nova direto no Nextcloud (QuickNotes) e a seleciona.
+  // Cria uma nota nova direto no Nextcloud (QuickNotes) e a seleciona. A nota nasce com
+  // um título (o QuickNotes rejeita nota totalmente vazia) para o usuário renomear.
   const handleNewNc = async () => {
     setShowTemplates(false);
     setSearch('');
+    setSourceFilter('all'); // garante que a nota nova (do NC) fique visível na lista
+    setNcNotice(null);
     try {
       const note = await pushToNc.mutateAsync({ title: 'Nova nota', body: '' });
       setSelectedId(note.id);
     } catch {
-      /* sem Nextcloud vinculado ou falha de rede — silencioso */
+      // Sem Nextcloud vinculado ou falha de rede: antes era silencioso e parecia que
+      // "nada acontecia". Agora avisamos.
+      setNcNotice('Não foi possível criar a nota no Nextcloud. Verifique a conexão.');
+      setTimeout(() => setNcNotice(null), 5000);
     }
   };
 
@@ -1350,6 +1362,7 @@ export function NotesView({
             onImportToLocal={handleImportToLocal}
             allNotes={allNotes}
             onSelectNote={setSelectedId}
+            ncLinked={ncLinked}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-slate-400">
@@ -1364,6 +1377,21 @@ export function NotesView({
           </div>
         )}
       </div>
+
+      {/* Aviso transitório (ex.: falha ao criar nota no Nextcloud) */}
+      {ncNotice && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[110] flex items-center gap-2 bg-red-600 text-white text-xs font-medium px-4 py-2.5 rounded-xl shadow-lg">
+          <AlertCircle size={15} className="flex-shrink-0" />
+          <span>{ncNotice}</span>
+          <button
+            onClick={() => setNcNotice(null)}
+            className="ml-1 text-white/70 hover:text-white"
+            title="Fechar"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
 
       {/* Confirmação de exclusão */}
       {pendingDelete && (

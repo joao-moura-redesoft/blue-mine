@@ -67,15 +67,25 @@ export function useDeleteNcNote() {
   });
 }
 
-// Bridge: envia uma nota local para o Nextcloud (ou cria uma nota nova no NC). Insere
-// a nota devolvida no cache na hora — para poder selecioná-la — e reconcilia depois.
+// Bridge: envia uma nota local para o Nextcloud (ou cria uma nota nova no NC). A nota
+// devolvida pelo POST é autoritativa — inserimos direto no cache para poder selecioná-la
+// na hora. NÃO invalidamos aqui: um refetch imediato da lista corre contra a nota recém
+// criada (o QuickNotes pode ainda não devolvê-la na listagem) e a apagaria do cache,
+// fazendo a seleção "piscar e sumir". A reconciliação natural acontece no próximo
+// refetchOnWindowFocus / expiração do staleTime.
 export function usePushNoteToNc() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ title, body }: { title: string; body: string }) => pushNoteToNc(title, body),
     onSuccess: (note) => {
-      qc.setQueryData<NcNote[]>(KEY, (old = []) => [note, ...old]);
-      qc.invalidateQueries({ queryKey: KEY });
+      // O create do QuickNotes às vezes não devolve `timestamp` → updatedAt: 0, o que
+      // jogaria a nota para o fim da lista (ordenada por recência). Garante que uma nota
+      // recém-criada apareça no topo.
+      const fresh: NcNote = note.updatedAt ? note : { ...note, updatedAt: Date.now() };
+      qc.setQueryData<NcNote[]>(KEY, (old = []) => [
+        fresh,
+        ...old.filter((n) => n.id !== fresh.id), // idempotente: substitui se já existir
+      ]);
     },
   });
 }

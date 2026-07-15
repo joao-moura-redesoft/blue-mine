@@ -86,7 +86,7 @@ function buildApp() {
       credentials: true,
     }),
   );
-  app.use(express.json());
+  app.use(express.json({ limit: '2mb' })); // padrão (100kb) estoura em payloads como o de standup/retrospectiva
   app.use(cookieParser());
 
   // Health-check público (liveness/readiness) — sem auth, para monitoração.

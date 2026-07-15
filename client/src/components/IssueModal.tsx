@@ -1813,6 +1813,28 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
 
   const dismissNote = (id: string) => setPendingNotes((prev) => prev.filter((n) => n.id !== id));
 
+  // Combina o payload original (baseFields) com os valores preenchidos no popup de
+  // campos obrigatórios. Um spread simples ({ ...base, ...extra }) sobrescreveria o
+  // array `custom_fields` inteiro — perdendo, p.ex., o Revisor já escolhido ao enviar
+  // para revisão quando o popup só pede a Nota de Versão. Aqui mesclamos os
+  // custom_fields por id (extra vence em caso de mesmo id).
+  const mergeFields = (
+    base: Record<string, unknown>,
+    extra: Record<string, unknown>,
+  ): Record<string, unknown> => {
+    const merged: Record<string, unknown> = { ...base, ...extra };
+    type Cf = { id: number; value: unknown };
+    const baseCfs = (base.custom_fields as Cf[] | undefined) ?? [];
+    const extraCfs = (extra.custom_fields as Cf[] | undefined) ?? [];
+    if (baseCfs.length || extraCfs.length) {
+      const byId = new Map<number, Cf>();
+      for (const c of baseCfs) byId.set(c.id, c);
+      for (const c of extraCfs) byId.set(c.id, c);
+      merged.custom_fields = Array.from(byId.values());
+    }
+    return merged;
+  };
+
   // Traduz o payload da API (status_id, assigned_to_id, …) para um patch no formato
   // Issue, usado no update otimista das listas/board. Só mapeia os campos visíveis no
   // card; descrição e campos personalizados caem no invalidate normal (sem patch).
@@ -2477,21 +2499,12 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                 infla a largura mínima do painel e espreme a sidebar de campos. */}
               <div className="flex-1 min-w-0 flex flex-col md:min-h-0">
                 <div className="md:flex-1 md:overflow-y-auto scrollbar-thin">
-                  {/* Descrição colapsável + anexos da tarefa */}
-                  <DescriptionPanel
-                    description={issue.description}
-                    attachments={issue.attachments ?? []}
-                    open={showDescription}
-                    onToggle={() => setShowDescription((v) => !v)}
-                    onEdit={() => {
-                      const md = textileToMarkdown(issue.description ?? '');
-                      descBaselineRef.current = md;
-                      setEditingDescription(md);
-                      setShowDescription(true);
-                    }}
-                  />
-                  {editingDescription !== null && (
-                    <div className="px-4 py-3 border-b border-slate-100 bg-blue-50/30 space-y-2">
+                  {/* Descrição: edita no lugar (igual aos comentários), sem abrir outro bloco */}
+                  {editingDescription !== null ? (
+                    <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 bg-blue-50/30 dark:bg-blue-900/20 space-y-2">
+                      <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+                        <FileText size={13} /> Editando descrição
+                      </div>
                       <MarkdownEditor
                         value={editingDescription}
                         onChange={setEditingDescription}
@@ -2519,7 +2532,7 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                         </button>
                         <button
                           onClick={() => setEditingDescription(null)}
-                          className="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg"
+                          className="px-3 py-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 border border-slate-200 dark:border-slate-600 rounded-lg"
                         >
                           Cancelar
                         </button>
@@ -2528,6 +2541,19 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                         </span>
                       </div>
                     </div>
+                  ) : (
+                    <DescriptionPanel
+                      description={issue.description}
+                      attachments={issue.attachments ?? []}
+                      open={showDescription}
+                      onToggle={() => setShowDescription((v) => !v)}
+                      onEdit={() => {
+                        const md = textileToMarkdown(issue.description ?? '');
+                        descBaselineRef.current = md;
+                        setEditingDescription(md);
+                        setShowDescription(true);
+                      }}
+                    />
                   )}
 
                   {/* Painel de IA — gera prompt, resumo de histórico e rascunho de nota */}
@@ -2650,8 +2676,8 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                                             onClick={() =>
                                               setEditingJournal({
                                                 id: journal.id,
-                                                text: journal.notes,
-                                                original: journal.notes,
+                                                text: textileToMarkdown(journal.notes),
+                                                original: textileToMarkdown(journal.notes),
                                               })
                                             }
                                             className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50"
@@ -2663,23 +2689,30 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                                       </div>
                                       {isEditing ? (
                                         <div className="space-y-1.5">
-                                          <textarea
-                                            autoFocus
+                                          <MarkdownEditor
                                             value={editingJournal.text}
-                                            onChange={(e) =>
+                                            onChange={(v) =>
                                               setEditingJournal((prev) =>
-                                                prev ? { ...prev, text: e.target.value } : null,
+                                                prev ? { ...prev, text: v } : null,
                                               )
                                             }
-                                            rows={4}
-                                            className="w-full text-sm px-3 py-2 border border-blue-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 resize-y bg-white"
+                                            attachments={issue.attachments ?? []}
+                                            autoFocus
+                                            minHeight={90}
+                                            onSubmit={() => {
+                                              updateJournal.mutate({
+                                                id: journal.id,
+                                                notes: markdownToTextile(editingJournal.text),
+                                              });
+                                              setEditingJournal(null);
+                                            }}
                                           />
                                           <div className="flex items-center gap-2">
                                             <button
                                               onClick={() => {
                                                 updateJournal.mutate({
                                                   id: journal.id,
-                                                  notes: editingJournal.text,
+                                                  notes: markdownToTextile(editingJournal.text),
                                                 });
                                                 setEditingJournal(null);
                                               }}
@@ -2690,12 +2723,12 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                                             </button>
                                             <button
                                               onClick={() => setEditingJournal(null)}
-                                              className="px-3 py-1 text-xs text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg"
+                                              className="px-3 py-1 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 border border-slate-200 dark:border-slate-600 rounded-lg"
                                             >
                                               Cancelar
                                             </button>
                                             <span className="text-[10px] text-slate-400">
-                                              Textile/Markdown
+                                              Markdown · Ctrl+Enter salva
                                             </span>
                                           </div>
                                         </div>
@@ -2755,8 +2788,8 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                                     onClick={() =>
                                       setEditingJournal({
                                         id: journal.id,
-                                        text: journal.notes,
-                                        original: journal.notes,
+                                        text: textileToMarkdown(journal.notes),
+                                        original: textileToMarkdown(journal.notes),
                                       })
                                     }
                                     className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50"
@@ -2768,23 +2801,30 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                               </div>
                               {isEditing ? (
                                 <div className="space-y-1.5">
-                                  <textarea
-                                    autoFocus
+                                  <MarkdownEditor
                                     value={editingJournal.text}
-                                    onChange={(e) =>
+                                    onChange={(v) =>
                                       setEditingJournal((prev) =>
-                                        prev ? { ...prev, text: e.target.value } : null,
+                                        prev ? { ...prev, text: v } : null,
                                       )
                                     }
-                                    rows={4}
-                                    className="w-full text-sm px-3 py-2 border border-blue-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 resize-y bg-white"
+                                    attachments={issue.attachments ?? []}
+                                    autoFocus
+                                    minHeight={90}
+                                    onSubmit={() => {
+                                      updateJournal.mutate({
+                                        id: journal.id,
+                                        notes: markdownToTextile(editingJournal.text),
+                                      });
+                                      setEditingJournal(null);
+                                    }}
                                   />
                                   <div className="flex items-center gap-2">
                                     <button
                                       onClick={() => {
                                         updateJournal.mutate({
                                           id: journal.id,
-                                          notes: editingJournal.text,
+                                          notes: markdownToTextile(editingJournal.text),
                                         });
                                         setEditingJournal(null);
                                       }}
@@ -2795,12 +2835,12 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                                     </button>
                                     <button
                                       onClick={() => setEditingJournal(null)}
-                                      className="px-3 py-1 text-xs text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg"
+                                      className="px-3 py-1 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 border border-slate-200 dark:border-slate-600 rounded-lg"
                                     >
                                       Cancelar
                                     </button>
                                     <span className="text-[10px] text-slate-400">
-                                      Textile/Markdown
+                                      Markdown · Ctrl+Enter salva
                                     </span>
                                   </div>
                                 </div>
@@ -2940,7 +2980,7 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
           loading={editFieldsLoading}
           saving={updateIssue.isPending}
           onCancel={() => setPendingRequired(null)}
-          onSubmit={(values) => updateField({ ...pendingRequired.baseFields, ...values })}
+          onSubmit={(values) => updateField(mergeFields(pendingRequired.baseFields, values))}
         />
       )}
       {confirmingClose && (
@@ -2949,16 +2989,18 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
           onClick={() => setConfirmingClose(false)}
         >
           <div
-            className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-5"
+            className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm p-5"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start gap-3">
-              <div className="w-9 h-9 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
-                <AlertCircle size={18} className="text-amber-600" />
+              <div className="w-9 h-9 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center flex-shrink-0">
+                <AlertCircle size={18} className="text-amber-600 dark:text-amber-400" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-sm font-semibold text-slate-800">Sair sem salvar?</h3>
-                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  Sair sem salvar?
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
                   Você tem uma edição em andamento que ainda não foi salva. Se sair agora, o
                   rascunho será perdido.
                 </p>
@@ -2967,7 +3009,7 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
             <div className="flex items-center justify-end gap-2 mt-4">
               <button
                 onClick={() => setConfirmingClose(false)}
-                className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-800 border border-slate-200 rounded-lg"
+                className="px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-800 dark:hover:text-slate-100 border border-slate-200 dark:border-slate-600 rounded-lg"
               >
                 Continuar editando
               </button>

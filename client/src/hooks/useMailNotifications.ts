@@ -9,7 +9,12 @@ export function useMailNotifications(unreadData: { unread: number } | undefined)
 
   useEffect(() => {
     if (unreadData === undefined) return;
-    const count = unreadData.unread;
+    // Coerção defensiva: se a query resolveu com dados parciais/erro, `unread` pode vir
+    // undefined/null e contaminar prevUnread — o delta viraria NaN e o alerta mostraria
+    // "NaN novas mensagens" (a comparação `count <= prev` não barra NaN). Ignora valores
+    // não-numéricos em vez de gravá-los.
+    const count = Number(unreadData.unread);
+    if (!Number.isFinite(count)) return;
 
     if (prevUnread.current === null) {
       prevUnread.current = count;

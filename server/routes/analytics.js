@@ -4,8 +4,13 @@
 const express = require('express');
 const router = express.Router();
 const handle = require('../lib/handle');
-const { makeRedmine } = require('../lib/redmine');
+const { makeRedmine, getMyUserId } = require('../lib/redmine');
 const { fetchAllIssues } = require('../lib/pagination');
+const { REDMINE_CF } = require('../lib/config');
+
+// CF 141 (DEV Desenvolvedor) — sinal real de quem desenvolveu, independente de
+// quem ficou como responsável no fim do fluxo (revisor/aceite).
+const CF_DEVELOPER = `cf_${REDMINE_CF.developer}`;
 
 const DAY = 24 * 60 * 60 * 1000;
 const daysAgo = (iso) =>
@@ -591,14 +596,29 @@ router.get(
     const days = Math.min(365, Math.max(30, Number(req.query.days) || 90));
     const now = new Date();
     const since = new Date(Date.now() - days * DAY).toISOString().slice(0, 10);
+    const userId = await getMyUserId(req);
 
-    // Redmine aceita assigned_to_id=me — não precisa resolver o id do usuário.
+    // Carga atual = o que está no meu colo agora (responsável = eu).
     const myOpen = await fetchAllIssues(redmine, { status_id: 'open', assigned_to_id: 'me' });
-    const myClosed = await fetchAllIssues(redmine, {
-      status_id: 'closed',
-      assigned_to_id: 'me',
-      updated_on: `>=${since}`,
-    });
+
+    // Entrega = o que EU desenvolvi (CF 141) OU fui responsável, fechado na janela.
+    // União para não perder nada: tarefas que desenvolvi e passei adiante ficam
+    // com meu nome no Desenvolvedor mesmo que o aceite final seja de outra pessoa.
+    const [closedAssigned, closedDeveloped] = await Promise.all([
+      fetchAllIssues(redmine, {
+        status_id: 'closed',
+        assigned_to_id: 'me',
+        updated_on: `>=${since}`,
+      }),
+      fetchAllIssues(redmine, {
+        status_id: 'closed',
+        [CF_DEVELOPER]: userId,
+        updated_on: `>=${since}`,
+      }),
+    ]);
+    const closedById = new Map();
+    for (const i of [...closedAssigned, ...closedDeveloped]) closedById.set(i.id, i);
+    const myClosed = [...closedById.values()];
 
     const result = computeMe({ myOpen, myClosed, now, days });
     res.json({ ...result, generatedAt: Date.now() });

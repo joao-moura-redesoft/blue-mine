@@ -30,6 +30,16 @@ export interface Upload {
   content_type: string;
 }
 
+// Payload enxuto p/ rotas de IA (standup/retrospectiva): só os campos usados no
+// servidor. Evita enviar description/journals/etc. e estourar o limite de body (413).
+const slimIssue = (i: Issue) => ({
+  id: i.id,
+  subject: i.subject,
+  status: { name: i.status?.name },
+  closed_on: i.closed_on,
+  updated_on: i.updated_on,
+});
+
 // Ação de escrita proposta pelo chat de IA, aguardando confirmação do usuário.
 export interface PendingAiAction {
   id: string;
@@ -376,7 +386,10 @@ export const redmineApi = {
 
   weeklyDigest: async (open: Issue[], completed: Issue[]): Promise<string> => {
     if (!aiConfigured()) throw new Error('AI_NOT_CONFIGURED');
-    const { data } = await api.post('/ai/weekly-digest', { open, completed });
+    const { data } = await api.post('/ai/weekly-digest', {
+      open: open.map(slimIssue),
+      completed: completed.map(slimIssue),
+    });
     return data.digest as string;
   },
 
@@ -510,7 +523,7 @@ export const redmineApi = {
 
   standup: async (issues: Issue[]): Promise<string> => {
     if (!aiConfigured()) throw new Error('AI_NOT_CONFIGURED');
-    const { data } = await api.post('/ai/standup', { issues });
+    const { data } = await api.post('/ai/standup', { issues: issues.map(slimIssue) });
     return data.standup as string;
   },
 

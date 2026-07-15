@@ -694,18 +694,25 @@ async function unreadCount(req) {
 // Baixa o conteúdo bruto de um anexo (proxy autenticado) via REST do Zimbra.
 // Recebe as credenciais explicitamente (vindas da sessão), sem estado global.
 async function fetchAttachment({ host, user, password }, msgId, part) {
-  const attUrl = (tok) =>
-    `https://${host}/service/home/~/?auth=qp&zauthtoken=${encodeURIComponent(tok)}&id=${encodeURIComponent(msgId)}&part=${encodeURIComponent(part)}`;
+  // Token vai no cookie ZM_AUTH_TOKEN, não na query string (evita vazamento do
+  // token nos logs de acesso do Zimbra — mesmo padrão de uploadAttachment).
+  const url = `https://${host}/service/home/~/?id=${encodeURIComponent(msgId)}&part=${encodeURIComponent(part)}`;
+  const get = (tok) =>
+    axios.get(url, {
+      responseType: 'arraybuffer',
+      timeout: 30000,
+      headers: { Cookie: `ZM_AUTH_TOKEN=${tok}` },
+    });
   let token = await authenticate(host, user, password);
   let resp;
   try {
-    resp = await axios.get(attUrl(token), { responseType: 'arraybuffer', timeout: 30000 });
+    resp = await get(token);
   } catch (e) {
     // 401/440 do Zimbra = token caiu: reautentica com as mesmas credenciais.
     if (e.response?.status !== 401 && e.response?.status !== 440) throw e;
     tokenCache.delete(`${host}:${user}`);
     token = await authenticate(host, user, password);
-    resp = await axios.get(attUrl(token), { responseType: 'arraybuffer', timeout: 30000 });
+    resp = await get(token);
   }
   return {
     data: Buffer.from(resp.data),

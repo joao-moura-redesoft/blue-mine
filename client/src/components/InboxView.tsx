@@ -183,7 +183,7 @@ export function InboxView({ onIssueClick }: Props) {
                   <p className="text-[11px] text-slate-400">{s.desc}</p>
                 </div>
               </div>
-              <div className="divide-y divide-slate-50">
+              <div className="divide-y divide-slate-50 dark:divide-slate-800">
                 {s.items.map((issue) => (
                   <button
                     key={issue.id}
