@@ -492,6 +492,11 @@ function safeInterval(fn, ms, label) {
 function startPushPolling() {
   if (DIGEST_ENABLED) safeInterval(runDigests, 5 * 60 * 1000, 'digest');
 
+  // Agendador de mensagens/lembretes do Talk. Roda sempre (mensagens agendadas não
+  // dependem de push); lembretes reaproveitam sendPush + as inscrições. Tick a cada 30s.
+  const scheduler = require('./scheduler');
+  safeInterval(() => scheduler.tick(subscriptions, sendPush), 30 * 1000, 'scheduler tick');
+
   if (WORKFLOWS_ENABLED) {
     const workflowEngine = require('./workflowEngine');
     safeInterval(

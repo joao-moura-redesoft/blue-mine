@@ -63,6 +63,10 @@ export interface TalkMessage {
   };
   reactions?: Record<string, number>;
   reactionsSelf?: string[];
+  // Edição: o Talk expõe lastEditTimestamp (> 0 quando a mensagem foi editada) + autor.
+  lastEditTimestamp?: number;
+  lastEditActorDisplayName?: string;
+  lastEditActorId?: string;
   // Campos client-only (envio otimista) — nunca vêm do servidor
   _status?: 'sending' | 'failed';
   _clientText?: string;
@@ -343,6 +347,57 @@ export async function pollLoginFlow(
 export async function searchNCUsers(search: string): Promise<NCUser[]> {
   const { data } = await api.get<NCUser[]>('/search/users', { params: { search } });
   return data;
+}
+
+// ─── Agendador (mensagens agendadas + lembretes) ─────────────────────────────
+
+export interface ScheduledItem {
+  id: string;
+  type: 'talk-message' | 'reminder';
+  roomToken: string;
+  roomName: string;
+  text: string;
+  fireAt: number;
+  status: string;
+}
+
+export async function listScheduled(): Promise<ScheduledItem[]> {
+  const { data } = await axios.get('/api/scheduler/talk');
+  return (data.items ?? []) as ScheduledItem[];
+}
+
+export async function createScheduled(body: {
+  type: 'talk-message' | 'reminder';
+  roomToken: string;
+  roomName?: string;
+  text: string;
+  fireAt: number;
+}): Promise<ScheduledItem> {
+  const { data } = await axios.post('/api/scheduler/talk', body);
+  return data as ScheduledItem;
+}
+
+export async function cancelScheduled(id: string): Promise<void> {
+  await axios.delete(`/api/scheduler/talk/${encodeURIComponent(id)}`);
+}
+
+// ─── IA do Talk (traduzir + sugerir resposta) ────────────────────────────────
+
+export async function translateMessage(
+  text: string,
+  target = 'Português (Brasil)',
+): Promise<string> {
+  const { data } = await axios.post('/api/ai/talk-translate', { text, target });
+  return (data?.translation ?? '') as string;
+}
+
+export async function suggestReplies(
+  context: string,
+  tone?: string,
+  draft?: string,
+): Promise<string[]> {
+  const { data } = await axios.post('/api/ai/talk-suggest-reply', { context, tone, draft });
+  return (data?.suggestions ?? []) as string[];
 }
 
 export interface UploadResult {

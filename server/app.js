@@ -110,6 +110,7 @@ function buildApp() {
   app.use('/api', require('./routes/digest'));
   app.use('/api', require('./routes/analytics'));
   app.use('/api', require('./routes/talk'));
+  app.use('/api', require('./routes/scheduler'));
   app.use('/api', require('./routes/notes'));
   app.use('/api', require('./routes/ncnotes'));
   app.use('/api', require('./routes/workflows'));

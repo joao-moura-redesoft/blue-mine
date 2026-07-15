@@ -105,11 +105,13 @@ export function useSendMessage(token: string | null, myId = '', myName = '') {
     // Sucesso: troca a bolha temporária pela mensagem real (sem flicker nem duplicata)
     onSuccess: (data, _v, ctx) => {
       if (ctx) {
-        qc.setQueryData(['talk-messages', token], (old: TalkMessage[] = []) =>
-          data?.id
-            ? old.map((m) => (m.id === ctx.clientId ? data : m))
-            : old.filter((m) => m.id !== ctx.clientId),
-        );
+        qc.setQueryData(['talk-messages', token], (old: TalkMessage[] = []) => {
+          if (!data?.id) return old.filter((m) => m.id !== ctx.clientId);
+          // Se o SSE já entregou a mensagem real (id real ≠ clientId temporário), a bolha
+          // definitiva já está na lista; apenas removemos a temporária para não duplicar.
+          if (old.some((m) => m.id === data.id)) return old.filter((m) => m.id !== ctx.clientId);
+          return old.map((m) => (m.id === ctx.clientId ? data : m));
+        });
       }
       qc.invalidateQueries({ queryKey: ['talk-messages', token] });
       qc.invalidateQueries({ queryKey: ['talk-rooms'] });
@@ -282,7 +284,17 @@ export function useTalkSSE(token: string | null, initialMessageId: number) {
           const toAdd = [...msgs].reverse().filter((m) => !ids.has(m.id));
           if (toAdd.length === 0) return old;
           hadNew = true;
-          return [...toAdd, ...old];
+          // Quando a mensagem real chega via SSE antes do onSuccess do envio, remove a
+          // bolha otimista correspondente (mesmo autor/texto ainda "enviando") para não
+          // exibir duas bolhas idênticas por alguns milissegundos.
+          const addedKeys = new Set(toAdd.map((m) => `${m.actorId} ${m.message}`));
+          const base = old.some((m) => m._status === 'sending')
+            ? old.filter(
+                (m) =>
+                  m._status !== 'sending' || !addedKeys.has(`${m.actorId} ${m.message}`),
+              )
+            : old;
+          return [...toAdd, ...base];
         });
         // invalidateQueries fora do updater para evitar efeito colateral em função pura
         if (hadNew) {

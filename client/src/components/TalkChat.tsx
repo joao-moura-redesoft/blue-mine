@@ -41,6 +41,14 @@ import {
   CornerUpRight,
   ListChecks,
   ListPlus,
+  Pin,
+  PinOff,
+  Hash,
+  Bookmark,
+  BookmarkCheck,
+  Clock,
+  Languages,
+  Sparkles,
 } from 'lucide-react';
 import { useJitsi } from './jitsi/JitsiContext';
 import { CreateIssueModal } from './CreateIssueModal';
@@ -88,12 +96,19 @@ import {
   setMyStatusType,
   setMyStatusMessage,
   clearMyStatusMessage,
+  createScheduled,
+  listScheduled,
+  cancelScheduled,
+  translateMessage,
+  suggestReplies,
   TALK_AUTH_EXPIRED_EVENT,
 } from '../api/talk';
 import type { UserStatusType } from '../api/talk';
 import { getStoredAuth, authHeaders, redmineApi } from '../api/redmine';
 import { talkBridge } from '../utils/talkBridge';
 import { talkMute } from '../utils/talkMute';
+import { talkPins } from '../utils/talkPins';
+import { talkSaved } from '../utils/talkSaved';
 import type { TalkRoom, TalkMessage, TalkParticipant, TalkMessageParam } from '../api/talk';
 import {
   formatDistanceToNow,
@@ -198,6 +213,27 @@ function parseMessageParts(text: string): MessagePart[] {
   return parts;
 }
 
+interface IssueChipData {
+  id: number;
+  subject: string;
+  status?: { id: number; name: string };
+  assigned_to?: { id: number; name: string };
+  tracker?: { name: string };
+  priority?: { name: string };
+  done_ratio?: number;
+}
+
+// Cor do ponto de status por palavra-chave do nome (Redmine varia os nomes).
+function statusDotColor(name?: string): string {
+  const n = (name || '').toLowerCase();
+  if (/fechad|resolvid|conclu|encerrad/.test(n)) return 'bg-green-500';
+  if (/revis|homolog|teste|valida/.test(n)) return 'bg-purple-500';
+  if (/andamento|progress|desenvolv|execu/.test(n)) return 'bg-blue-500';
+  if (/pendent|aguard|espera|impedid|bloque/.test(n)) return 'bg-amber-500';
+  if (/nova|aberta|backlog|entrada/.test(n)) return 'bg-slate-400';
+  return 'bg-slate-400';
+}
+
 function RedmineIssueChip({
   id,
   isMe,
@@ -215,25 +251,49 @@ function RedmineIssueChip({
         headers: authHeaders(),
       });
       const d = await r.json();
-      return (d.issues?.[0] ?? null) as { id: number; subject: string } | null;
+      return (d.issues?.[0] ?? null) as IssueChipData | null;
     },
     enabled: !!auth,
     staleTime: 10 * 60 * 1000,
   });
+  const title = data
+    ? [
+        `#${data.id} — ${data.subject}`,
+        data.status && `Status: ${data.status.name}`,
+        data.assigned_to && `Responsável: ${data.assigned_to.name}`,
+        data.tracker && `Tipo: ${data.tracker.name}`,
+        typeof data.done_ratio === 'number' && `Progresso: ${data.done_ratio}%`,
+      ]
+        .filter(Boolean)
+        .join('\n')
+    : `Abrir #${id}`;
   return (
     <button
       onClick={(e) => {
         e.stopPropagation();
         onIssueClick?.(id);
       }}
+      title={title}
       className={`inline-flex items-baseline gap-1 px-2 py-0.5 mx-0.5 rounded-md text-[11px] font-medium transition-colors align-baseline border ${
         isMe
           ? 'bg-white/20 border-white/40 text-white hover:bg-white/30'
           : 'bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100'
       }`}
     >
+      {data?.status && (
+        <span
+          className={`self-center w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDotColor(
+            data.status.name,
+          )}`}
+        />
+      )}
       <span className="font-mono font-bold flex-shrink-0">#{id}</span>
       {data?.subject && <span>— {data.subject}</span>}
+      {data?.assigned_to && (
+        <span className={`flex-shrink-0 ${isMe ? 'text-white/70' : 'text-blue-500'}`}>
+          · {data.assigned_to.name.split(' ')[0]}
+        </span>
+      )}
     </button>
   );
 }
@@ -1261,6 +1321,300 @@ function ForwardDialog({ msgs, onClose }: { msgs: TalkMessage[]; onClose: () => 
   );
 }
 
+// ─── Diálogo: anexar mensagem(ns) como nota numa tarefa do Redmine ────────────
+
+function AttachNoteDialog({
+  msgs,
+  roomName,
+  onClose,
+  onOpenIssue,
+}: {
+  msgs: TalkMessage[];
+  roomName: string;
+  onClose: () => void;
+  onOpenIssue?: (id: number) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [debounced, setDebounced] = useState('');
+  const [posting, setPosting] = useState<number | null>(null);
+  const [doneTo, setDoneTo] = useState<number | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(query.trim()), 350);
+    return () => clearTimeout(t);
+  }, [query]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const { data: results = [], isFetching } = useQuery({
+    queryKey: ['attach-issue-search', debounced],
+    queryFn: () => redmineApi.searchIssues(debounced),
+    enabled: debounced.length >= 2,
+    staleTime: 30_000,
+  });
+
+  const ordered = [...msgs].sort((a, b) => a.timestamp - b.timestamp);
+  const noteText =
+    ordered
+      .map((m) => {
+        const who = m.actorDisplayName?.split(' ')[0] || m.actorId;
+        const when = format(new Date(m.timestamp * 1000), 'dd/MM HH:mm');
+        return `${who} (${when}): ${resolveMessageText(m)}`;
+      })
+      .join('\n') + `\n\n— via Talk · ${roomName}`;
+  const preview =
+    ordered.length === 1
+      ? resolveMessageText(ordered[0]) || '📎 Anexo'
+      : `${ordered.length} mensagens`;
+
+  const attach = async (id: number) => {
+    setPosting(id);
+    setError('');
+    try {
+      await redmineApi.addNote(id, noteText);
+      setDoneTo(id);
+      setTimeout(onClose, 900);
+    } catch {
+      setPosting(null);
+      setError('Falha ao adicionar a nota — verifique se você tem permissão nessa tarefa.');
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-80 max-h-[70vh] flex flex-col bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label="Anexar como nota"
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+          <span className="text-sm font-semibold text-slate-800">Adicionar como nota…</span>
+          <button
+            onClick={onClose}
+            className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-600"
+            aria-label="Fechar"
+          >
+            <X size={14} />
+          </button>
+        </div>
+        <div className="px-3 py-2 border-b border-slate-100">
+          <p className="text-[11px] text-slate-500 bg-slate-50 rounded-lg px-2.5 py-1.5 line-clamp-2 mb-2">
+            {preview}
+          </p>
+          <div className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-1.5">
+            <Search size={13} className="text-slate-400 flex-shrink-0" />
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar tarefa (nº ou texto)…"
+              className="flex-1 text-xs bg-transparent focus:outline-none placeholder-slate-400"
+            />
+          </div>
+          {error && <p className="text-[11px] text-red-500 mt-1.5 px-1">{error}</p>}
+        </div>
+        <div className="overflow-y-auto scrollbar-thin">
+          {debounced.length < 2 && (
+            <div className="text-center py-6 text-xs text-slate-400">
+              Digite para buscar a tarefa
+            </div>
+          )}
+          {debounced.length >= 2 && isFetching && results.length === 0 && (
+            <div className="text-center py-6 text-xs text-slate-400">Buscando…</div>
+          )}
+          {debounced.length >= 2 && !isFetching && results.length === 0 && (
+            <div className="text-center py-6 text-xs text-slate-400">Nenhuma tarefa encontrada</div>
+          )}
+          {results.map((r) => (
+            <button
+              key={r.id}
+              onClick={() => attach(r.id)}
+              disabled={posting !== null}
+              className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-slate-50 text-left transition-colors border-b border-slate-50 last:border-0 disabled:opacity-60"
+            >
+              <span className="font-mono text-[11px] font-bold text-blue-600 flex-shrink-0">
+                #{r.id}
+              </span>
+              <span className="flex-1 text-xs text-slate-700 truncate">{r.subject}</span>
+              {posting === r.id &&
+                (doneTo === r.id ? (
+                  <Check size={14} className="text-green-500 flex-shrink-0" />
+                ) : (
+                  <Loader2 size={14} className="text-slate-400 animate-spin flex-shrink-0" />
+                ))}
+            </button>
+          ))}
+        </div>
+        {doneTo && (
+          <button
+            onClick={() => {
+              onOpenIssue?.(doneTo);
+              onClose();
+            }}
+            className="px-4 py-2 text-[11px] text-blue-600 hover:bg-blue-50 border-t border-slate-100 text-center"
+          >
+            Nota adicionada — abrir #{doneTo}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Diálogo: lembrar-me de uma mensagem ──────────────────────────────────────
+
+// Presets de horário para agendamentos (lembrete/mensagem). Devolve epoch ms.
+function schedulePresets(): Array<{ label: string; at: number }> {
+  const now = Date.now();
+  const tomorrow9 = new Date();
+  tomorrow9.setDate(tomorrow9.getDate() + 1);
+  tomorrow9.setHours(9, 0, 0, 0);
+  const inHours = (h: number) => {
+    const d = new Date();
+    d.setHours(d.getHours() + h);
+    return d.getTime();
+  };
+  return [
+    { label: 'Em 30 minutos', at: now + 30 * 60_000 },
+    { label: 'Em 1 hora', at: inHours(1) },
+    { label: 'Em 3 horas', at: inHours(3) },
+    { label: 'Amanhã às 9h', at: tomorrow9.getTime() },
+  ];
+}
+
+// datetime-local usa horário LOCAL sem timezone; convertê-lo direto com new Date()
+// já interpreta como local. Formata "agora+offset" para o valor mínimo do input.
+function toLocalInputValue(ms: number): string {
+  const d = new Date(ms - new Date().getTimezoneOffset() * 60_000);
+  return d.toISOString().slice(0, 16);
+}
+
+function ReminderDialog({
+  msg,
+  roomToken,
+  roomName,
+  onClose,
+}: {
+  msg: TalkMessage;
+  roomToken: string;
+  roomName: string;
+  onClose: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState('');
+  const [custom, setCustom] = useState('');
+  const quote = `${msg.actorDisplayName.split(' ')[0]}: ${resolveMessageText(msg)
+    .replace(/\n+/g, ' ')
+    .slice(0, 160)}`;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const schedule = async (fireAt: number) => {
+    if (!Number.isFinite(fireAt) || fireAt <= Date.now()) {
+      setError('Escolha um horário futuro.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await createScheduled({ type: 'reminder', roomToken, roomName, text: quote, fireAt });
+      setDone(true);
+      setTimeout(onClose, 900);
+    } catch {
+      setBusy(false);
+      setError('Falha ao agendar o lembrete.');
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[130] flex items-center justify-center bg-black/30 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-80 bg-white rounded-2xl shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label="Lembrar-me"
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+          <span className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+            <Clock size={15} className="text-blue-500" /> Lembrar-me disto
+          </span>
+          <button
+            onClick={onClose}
+            className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-600"
+          >
+            <X size={14} />
+          </button>
+        </div>
+        <div className="p-4 space-y-3">
+          <p className="text-[11px] text-slate-500 bg-slate-50 rounded-lg px-2.5 py-1.5 line-clamp-2">
+            {quote}
+          </p>
+          {done ? (
+            <p className="text-center text-sm text-green-600 py-3 flex items-center justify-center gap-2">
+              <Check size={16} /> Lembrete agendado
+            </p>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-1.5">
+                {schedulePresets().map((p) => (
+                  <button
+                    key={p.label}
+                    onClick={() => schedule(p.at)}
+                    disabled={busy}
+                    className="px-2 py-2 rounded-lg bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-300 text-xs text-slate-700 transition-colors disabled:opacity-60"
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="datetime-local"
+                  value={custom}
+                  min={toLocalInputValue(Date.now() + 60_000)}
+                  onChange={(e) => setCustom(e.target.value)}
+                  className="flex-1 text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-400"
+                />
+                <button
+                  onClick={() => custom && schedule(new Date(custom).getTime())}
+                  disabled={busy || !custom}
+                  className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium disabled:opacity-40 transition-colors"
+                >
+                  {busy ? <Loader2 size={13} className="animate-spin" /> : 'OK'}
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-400 leading-snug">
+                O lembrete chega como notificação — mantenha as notificações do app ativadas.
+              </p>
+              {error && <p className="text-[11px] text-red-500">{error}</p>}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Bubble({
   msg,
   isMe,
@@ -1273,7 +1627,14 @@ function Bubble({
   onRetry,
   onCopy,
   onForward,
+  onReplyPrivately,
+  onTogglePin,
+  pinned,
   onCreateTask,
+  onAttachToIssue,
+  onSaveMessage,
+  saved,
+  onScheduleReminder,
   onStartSelect,
   onToggleSelect,
   onAvatarClick,
@@ -1302,7 +1663,14 @@ function Bubble({
   onRetry?: (msg: TalkMessage) => void;
   onCopy?: (msg: TalkMessage) => void;
   onForward?: (msg: TalkMessage) => void;
+  onReplyPrivately?: (msg: TalkMessage) => void;
+  onTogglePin?: (msg: TalkMessage) => void;
+  pinned?: boolean;
   onCreateTask?: (msg: TalkMessage) => void;
+  onAttachToIssue?: (msg: TalkMessage) => void;
+  onSaveMessage?: (msg: TalkMessage) => void;
+  saved?: boolean;
+  onScheduleReminder?: (msg: TalkMessage) => void;
   onStartSelect?: (msg: TalkMessage) => void;
   onToggleSelect?: (msg: TalkMessage) => void;
   onAvatarClick?: (actorId: string, displayName: string) => void;
@@ -1348,6 +1716,26 @@ function Bubble({
   const [filePreview, setFilePreview] = useState(false);
   // Em telas de toque (sem hover) tocar na bolha revela a barra de ações.
   const [actionsOpen, setActionsOpen] = useState(false);
+  // Tradução inline (IA) — texto traduzido exibido sob a bolha.
+  const [translated, setTranslated] = useState<string | null>(null);
+  const [translating, setTranslating] = useState(false);
+  const [translateErr, setTranslateErr] = useState(false);
+  const doTranslate = async () => {
+    if (translated) {
+      setTranslated(null);
+      return;
+    }
+    setTranslating(true);
+    setTranslateErr(false);
+    try {
+      const t = await translateMessage(resolveMessageText(msg));
+      setTranslated(t || '(sem tradução)');
+    } catch {
+      setTranslateErr(true);
+    } finally {
+      setTranslating(false);
+    }
+  };
   const reactions = msg.reactions ?? {};
   const reactionsSelf = msg.reactionsSelf ?? [];
   // Mensagem de chamada de vídeo do Talk → renderiza card "Entrar na chamada".
@@ -1493,6 +1881,28 @@ function Bubble({
                         >
                           <CornerUpRight size={12} /> Encaminhar
                         </button>
+                        {!file && !callRoom && (
+                          <button
+                            onClick={() => {
+                              doTranslate();
+                              setShowMenu(false);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-xs text-slate-700"
+                          >
+                            <Languages size={12} /> {translated ? 'Ocultar tradução' : 'Traduzir'}
+                          </button>
+                        )}
+                        {!isMe && !isDM && msg.actorType === 'users' && onReplyPrivately && (
+                          <button
+                            onClick={() => {
+                              onReplyPrivately(msg);
+                              setShowMenu(false);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-xs text-slate-700"
+                          >
+                            <Reply size={12} /> Responder no privado
+                          </button>
+                        )}
                         <button
                           onClick={() => {
                             onCreateTask?.(msg);
@@ -1502,6 +1912,47 @@ function Bubble({
                         >
                           <ListPlus size={12} /> Criar tarefa
                         </button>
+                        {onAttachToIssue && (
+                          <button
+                            onClick={() => {
+                              onAttachToIssue(msg);
+                              setShowMenu(false);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-xs text-slate-700"
+                          >
+                            <Hash size={12} /> Adicionar a uma tarefa
+                          </button>
+                        )}
+                        {onSaveMessage && (
+                          <button
+                            onClick={() => {
+                              onSaveMessage(msg);
+                              setShowMenu(false);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-xs text-slate-700"
+                          >
+                            {saved ? (
+                              <>
+                                <BookmarkCheck size={12} /> Remover dos salvos
+                              </>
+                            ) : (
+                              <>
+                                <Bookmark size={12} /> Salvar mensagem
+                              </>
+                            )}
+                          </button>
+                        )}
+                        {onScheduleReminder && (
+                          <button
+                            onClick={() => {
+                              onScheduleReminder(msg);
+                              setShowMenu(false);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-xs text-slate-700"
+                          >
+                            <Clock size={12} /> Lembrar-me disto
+                          </button>
+                        )}
                         <button
                           onClick={() => {
                             onStartSelect?.(msg);
@@ -1511,6 +1962,25 @@ function Bubble({
                         >
                           <ListChecks size={12} /> Selecionar
                         </button>
+                        {onTogglePin && (
+                          <button
+                            onClick={() => {
+                              onTogglePin(msg);
+                              setShowMenu(false);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-xs text-slate-700"
+                          >
+                            {pinned ? (
+                              <>
+                                <PinOff size={12} /> Desafixar
+                              </>
+                            ) : (
+                              <>
+                                <Pin size={12} /> Fixar mensagem
+                              </>
+                            )}
+                          </button>
+                        )}
                         {isMe && (
                           <>
                             <button
@@ -1611,6 +2081,31 @@ function Bubble({
             )}
           </div>
         </div>
+        {/* Tradução inline (IA) */}
+        {(translating || translated || translateErr) && (
+          <div
+            className={`mt-1 max-w-full text-xs rounded-xl px-3 py-1.5 border ${
+              isMe
+                ? 'bg-blue-50 border-blue-100 text-slate-700'
+                : 'bg-slate-50 border-slate-200 text-slate-700'
+            }`}
+          >
+            <div className="flex items-center gap-1 text-[9px] font-semibold text-slate-400 uppercase tracking-wide mb-0.5">
+              <Languages size={10} /> Tradução
+            </div>
+            {translating ? (
+              <span className="flex items-center gap-1.5 text-slate-400">
+                <Loader2 size={11} className="animate-spin" /> Traduzindo…
+              </span>
+            ) : translateErr ? (
+              <span className="text-red-500">Falha ao traduzir (verifique a chave de IA).</span>
+            ) : (
+              <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                {translated}
+              </span>
+            )}
+          </div>
+        )}
         {/* OG preview — só para mensagens de texto com URL externa (não em chamadas) */}
         {!file &&
           !callRoom &&
@@ -1650,6 +2145,22 @@ function Bubble({
               >
                 {format(new Date(msg.timestamp * 1000), 'HH:mm')}
               </span>
+              {!!msg.lastEditTimestamp && msg.lastEditTimestamp > 0 && (
+                <span
+                  className="text-[9px] italic text-slate-400"
+                  title={`Editada ${format(
+                    new Date(msg.lastEditTimestamp * 1000),
+                    "d 'de' MMMM 'às' HH:mm",
+                    { locale: ptBR },
+                  )}${
+                    msg.lastEditActorDisplayName
+                      ? ` por ${msg.lastEditActorDisplayName.split(' ')[0]}`
+                      : ''
+                  }`}
+                >
+                  editada
+                </span>
+              )}
               {isMe && msg._status === 'sending' && (
                 <Loader2 size={11} className="text-slate-400 animate-spin" />
               )}
@@ -1737,6 +2248,8 @@ function MessageInput({
   onCancelReply,
   editValue,
   onCancelEdit,
+  roomName,
+  suggestContext,
 }: {
   token: string;
   onSend: (msg: string, replyTo?: number) => void;
@@ -1745,6 +2258,8 @@ function MessageInput({
   onCancelReply: () => void;
   editValue?: string; // texto pré-preenchido ao editar
   onCancelEdit?: () => void;
+  roomName?: string;
+  suggestContext?: string; // últimas mensagens (texto) para sugerir respostas
 }) {
   // Rascunho por sala: preserva o texto digitado ao fechar/reabrir a conversa.
   const draftKey = `talk-draft-${token}`;
@@ -1759,8 +2274,51 @@ function MessageInput({
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [pendingPreview, setPendingPreview] = useState<string | null>(null);
   const [showEmoji, setShowEmoji] = useState(false);
+  // Agendar mensagem (enviar depois)
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
+  const [scheduleMsg, setScheduleMsg] = useState('');
+  const [customWhen, setCustomWhen] = useState('');
+  // Sugestões de resposta (IA)
+  const [suggestions, setSuggestions] = useState<string[] | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Agenda a mensagem digitada para envio futuro (via servidor).
+  const scheduleCurrent = async (fireAt: number) => {
+    const text = input.trim();
+    if (!text || !Number.isFinite(fireAt) || fireAt <= Date.now()) return;
+    setScheduling(true);
+    try {
+      await createScheduled({ type: 'talk-message', roomToken: token, roomName, text, fireAt });
+      setInput('');
+      setShowSchedule(false);
+      setCustomWhen('');
+      setScheduleMsg(`Agendada para ${format(new Date(fireAt), "dd/MM 'às' HH:mm")}`);
+      setTimeout(() => setScheduleMsg(''), 4000);
+    } catch {
+      setScheduleMsg('Falha ao agendar.');
+      setTimeout(() => setScheduleMsg(''), 4000);
+    } finally {
+      setScheduling(false);
+    }
+  };
+
+  // Busca sugestões de resposta (ou reescreve o rascunho ajustando o tom).
+  const fetchSuggestions = async () => {
+    if (suggesting) return;
+    setSuggesting(true);
+    setSuggestions(null);
+    try {
+      const list = await suggestReplies(suggestContext ?? '', undefined, input.trim() || undefined);
+      setSuggestions(list.length ? list : ['(sem sugestões)']);
+    } catch {
+      setSuggestions(['Falha ao gerar (verifique a chave de IA em Configurações → IA).']);
+    } finally {
+      setSuggesting(false);
+    }
+  };
 
   // Insere o emoji na posição atual do cursor (ou no fim).
   const insertEmoji = (emoji: string) => {
@@ -2155,7 +2713,86 @@ function MessageInput({
           </button>
         </div>
       ) : (
-        <div className="flex items-center gap-1.5 px-3 py-2 border-t border-slate-100">
+        <div className="relative flex items-center gap-1.5 px-3 py-2 border-t border-slate-100">
+          {/* Toast de agendamento */}
+          {scheduleMsg && (
+            <div className="absolute -top-8 left-3 z-40 flex items-center gap-1.5 bg-slate-800 text-white text-[11px] px-2.5 py-1 rounded-lg shadow-lg">
+              <Clock size={11} /> {scheduleMsg}
+            </div>
+          )}
+          {/* Popover de sugestões de resposta (IA) */}
+          {suggestions && (
+            <div className="absolute bottom-full left-2 right-2 mb-1 z-40 bg-white border border-slate-200 rounded-xl shadow-xl p-1.5 space-y-1">
+              <div className="flex items-center justify-between px-1.5 pb-0.5">
+                <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-1">
+                  <Sparkles size={10} /> {input.trim() ? 'Ajustes de tom' : 'Sugestões'}
+                </span>
+                <button
+                  onClick={() => setSuggestions(null)}
+                  className="text-slate-400 hover:text-slate-600"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+              {suggestions.map((s, i) => (
+                <button
+                  key={i}
+                  onClick={() => {
+                    setInput(s);
+                    setSuggestions(null);
+                    setTimeout(() => inputRef.current?.focus(), 0);
+                  }}
+                  className="w-full text-left text-xs text-slate-700 px-2 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
+          {/* Popover de agendamento de mensagem */}
+          {showSchedule && (
+            <div className="absolute bottom-full right-2 mb-1 z-40 w-60 bg-white border border-slate-200 rounded-xl shadow-xl p-2">
+              <div className="flex items-center justify-between px-1 pb-1">
+                <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-1">
+                  <Clock size={10} /> Enviar depois
+                </span>
+                <button
+                  onClick={() => setShowSchedule(false)}
+                  className="text-slate-400 hover:text-slate-600"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-1">
+                {schedulePresets().map((p) => (
+                  <button
+                    key={p.label}
+                    onClick={() => scheduleCurrent(p.at)}
+                    disabled={scheduling}
+                    className="px-1.5 py-1.5 rounded-lg bg-slate-50 hover:bg-blue-50 border border-slate-200 text-[11px] text-slate-700 transition-colors disabled:opacity-50"
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-1 mt-1.5">
+                <input
+                  type="datetime-local"
+                  value={customWhen}
+                  min={toLocalInputValue(Date.now() + 60_000)}
+                  onChange={(e) => setCustomWhen(e.target.value)}
+                  className="flex-1 text-[11px] border border-slate-200 rounded-lg px-1.5 py-1 focus:outline-none focus:border-blue-400"
+                />
+                <button
+                  onClick={() => customWhen && scheduleCurrent(new Date(customWhen).getTime())}
+                  disabled={scheduling || !customWhen}
+                  className="px-2 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[11px] disabled:opacity-40"
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+          )}
           <input type="file" ref={fileRef} onChange={handleFile} className="hidden" />
           <button
             onClick={() => fileRef.current?.click()}
@@ -2183,6 +2820,16 @@ function MessageInput({
               />
             )}
           </div>
+          {editValue === undefined && (
+            <button
+              onClick={fetchSuggestions}
+              disabled={uploading || suggesting}
+              title={input.trim() ? 'Ajustar tom do rascunho (IA)' : 'Sugerir resposta (IA)'}
+              className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-slate-100 rounded-lg transition-colors flex-shrink-0 disabled:opacity-40"
+            >
+              {suggesting ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            </button>
+          )}
           <textarea
             ref={inputRef}
             value={input}
@@ -2211,6 +2858,16 @@ function MessageInput({
             }
             className="flex-1 text-xs bg-slate-50 border border-slate-200 rounded-2xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-400 resize-none max-h-32 overflow-y-auto scrollbar-thin leading-relaxed"
           />
+          {input.trim() && !pendingFile && editValue === undefined && (
+            <button
+              onClick={() => setShowSchedule((v) => !v)}
+              disabled={uploading}
+              title="Enviar depois"
+              className={`p-1.5 rounded-lg transition-colors flex-shrink-0 disabled:opacity-40 ${showSchedule ? 'text-blue-600 bg-blue-50' : 'text-slate-400 hover:text-blue-600 hover:bg-slate-100'}`}
+            >
+              <Clock size={14} />
+            </button>
+          )}
           {input.trim() || pendingFile ? (
             <button
               onClick={submit}
@@ -2280,10 +2937,12 @@ function ChatWindow({
   const { data: participants = [] } = useQuery({
     queryKey: ['talk-participants', room.token],
     queryFn: () => fetchParticipants(room.token),
-    // Recibos de leitura dependem do lastReadMessage destes participantes;
-    // intervalo mais curto + refetch ao focar deixam ✓ → ✓✓ mais responsivo.
-    staleTime: 10_000,
-    refetchInterval: 20_000,
+    // Recibos de leitura dependem do lastReadMessage destes participantes. Uma leitura
+    // "pura" (o outro só abre a conversa, sem digitar/enviar) não gera evento no SSE,
+    // então só é refletida neste poll — intervalo curto + refetch ao focar deixam
+    // ✓ → ✓✓ responsivo. Pausa sozinho quando a aba perde o foco (sem refetchIntervalInBackground).
+    staleTime: 5_000,
+    refetchInterval: 10_000,
     refetchOnWindowFocus: true,
     enabled: !!getTalkAuth(),
   });
@@ -2304,12 +2963,14 @@ function ChatWindow({
     [activeParticipants],
   );
 
-  // Alguns servidores/versões do Talk NÃO expõem `lastReadMessage` nos participantes
-  // (recurso de read-status desativado/ausente). Detectamos isso para não exibir um
-  // recibo de leitura enganoso (✓✓ que nunca acende) — caindo para "Enviada" (✓).
+  // Alguns servidores/versões do Talk NÃO expõem `lastReadMessage` dos OUTROS
+  // participantes (status de leitura privado no Nextcloud, ou recurso ausente).
+  // Detectamos isso olhando apenas para os outros — o meu próprio participante SEMPRE
+  // traz um lastReadMessage numérico, então incluí-lo tornaria isto sempre verdadeiro
+  // e exibiria um ✓✓ enganoso que nunca acende. Sem status alheio, caímos para "Enviada" (✓).
   const readStatusAvailable = useMemo(
-    () => participants.some((p) => typeof p.lastReadMessage === 'number'),
-    [participants],
+    () => activeParticipants.some((p) => typeof p.lastReadMessage === 'number'),
+    [activeParticipants],
   );
 
   // Mute por sala
@@ -2490,6 +3151,75 @@ function ChatWindow({
     [qc, onOpenRoom],
   );
 
+  // "Responder no privado": abre a DM com o autor da mensagem e semeia o rascunho da
+  // DM com uma citação, para o usuário digitar a resposta com o contexto à mão.
+  // (O replyTo do Talk é por-sala, então a ligação vira uma citação em texto.)
+  const replyPrivately = useCallback(
+    async (msg: TalkMessage) => {
+      try {
+        const dm = await createRoom(1, msg.actorId);
+        const quote = `> ${msg.actorDisplayName.split(' ')[0]}: ${resolveMessageText(msg)
+          .replace(/\n+/g, ' ')
+          .slice(0, 140)}\n\n`;
+        const draftKey = `talk-draft-${dm.token}`;
+        const existing = localStorage.getItem(draftKey) ?? '';
+        // Evita empilhar a mesma citação se a DM ainda não foi aberta.
+        if (!existing.startsWith(quote)) localStorage.setItem(draftKey, quote + existing);
+        qc.invalidateQueries({ queryKey: ['talk-rooms'] });
+        onOpenRoom(dm);
+      } catch {
+        /* falha silenciosa */
+      }
+    },
+    [qc, onOpenRoom],
+  );
+
+  // Mensagem fixada (LOCAL — só o próprio usuário vê; ver utils/talkPins).
+  const [pinned, setPinned] = useState(() => talkPins.get(room.token));
+  useEffect(() => {
+    const sync = () => setPinned(talkPins.get(room.token));
+    sync();
+    window.addEventListener(talkPins.EVENT, sync);
+    return () => window.removeEventListener(talkPins.EVENT, sync);
+  }, [room.token]);
+  const togglePin = useCallback(
+    (msg: TalkMessage) => {
+      if (talkPins.isPinned(room.token, msg.id)) {
+        talkPins.clear(room.token);
+      } else {
+        talkPins.set(room.token, {
+          id: msg.id,
+          text: resolveMessageText(msg).replace(/\n+/g, ' ').slice(0, 160),
+          author: msg.actorDisplayName.split(' ')[0],
+        });
+      }
+    },
+    [room.token],
+  );
+
+  // Mensagens salvas (bookmarks globais — ver utils/talkSaved).
+  const [savedIds, setSavedIds] = useState<Set<number>>(() => talkSaved.idsForRoom(room.token));
+  useEffect(() => {
+    const sync = () => setSavedIds(talkSaved.idsForRoom(room.token));
+    sync();
+    window.addEventListener(talkSaved.EVENT, sync);
+    return () => window.removeEventListener(talkSaved.EVENT, sync);
+  }, [room.token]);
+  const toggleSaveMessage = useCallback(
+    (msg: TalkMessage) => {
+      talkSaved.toggle({
+        roomToken: room.token,
+        roomName: room.displayName,
+        id: msg.id,
+        text: resolveMessageText(msg).replace(/\n+/g, ' ').slice(0, 200),
+        author: msg.actorDisplayName.split(' ')[0] || msg.actorId,
+        timestamp: msg.timestamp,
+        savedAt: Date.now(),
+      });
+    },
+    [room.token, room.displayName],
+  );
+
   // Conexão
   const [connected, setConnected] = useState(true);
 
@@ -2520,6 +3250,16 @@ function ChatWindow({
       return m.messageType === 'comment' && (!m.systemMessage || hasFile);
     });
   }, [allMessages]);
+
+  // Contexto para sugestões de resposta (IA): últimas ~10 mensagens de texto.
+  const suggestContext = useMemo(
+    () =>
+      visibleMessages
+        .slice(-10)
+        .map((m) => `${m.actorDisplayName?.split(' ')[0] || m.actorId}: ${resolveMessageText(m)}`)
+        .join('\n'),
+    [visibleMessages],
+  );
 
   const loadMore = async () => {
     if (loadingMore || !hasMore || allMessages.length === 0) return;
@@ -2682,6 +3422,10 @@ function ChatWindow({
 
   // Encaminhar: escolhe uma sala de destino num diálogo (1 ou N mensagens)
   const [forwardMsgs, setForwardMsgs] = useState<TalkMessage[] | null>(null);
+  // Anexar como nota: escolhe uma tarefa do Redmine num diálogo
+  const [attachMsgs, setAttachMsgs] = useState<TalkMessage[] | null>(null);
+  // Lembrete: mensagem para a qual agendar um lembrete
+  const [reminderMsg, setReminderMsg] = useState<TalkMessage | null>(null);
 
   // ─── Seleção múltipla + criar tarefa ─────────────────────────────────────
   const [selectionMode, setSelectionMode] = useState(false);
@@ -3075,6 +3819,33 @@ function ChatWindow({
         </div>
       )}
 
+      {/* Banner de mensagem fixada (local) */}
+      {pinned && (
+        <button
+          onClick={() => jumpToMessage(pinned.id)}
+          className="flex items-center gap-2 w-full px-3 py-1.5 bg-amber-50 border-b border-amber-100 text-left hover:bg-amber-100/70 transition-colors group/pin"
+          title="Ir para a mensagem fixada"
+        >
+          <Pin size={12} className="text-amber-500 flex-shrink-0 rotate-45" />
+          <span className="flex-1 min-w-0 text-[11px] text-slate-600 truncate">
+            <span className="font-semibold text-slate-700">{pinned.author}: </span>
+            {pinned.text}
+          </span>
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation();
+              talkPins.clear(room.token);
+            }}
+            className="flex-shrink-0 p-0.5 rounded text-amber-400 hover:text-amber-600 hover:bg-amber-200/60"
+            title="Desafixar"
+          >
+            <PinOff size={12} />
+          </span>
+        </button>
+      )}
+
       {/* Mensagens */}
       <div
         className="flex-1 overflow-y-auto p-3 scrollbar-thin"
@@ -3161,7 +3932,14 @@ function ChatWindow({
                   onRetry={retrySend}
                   onCopy={copyMessage}
                   onForward={(msg) => setForwardMsgs([msg])}
+                  onReplyPrivately={replyPrivately}
+                  onTogglePin={togglePin}
+                  pinned={pinned?.id === m.id}
                   onCreateTask={(msg) => openTaskFrom([msg.id])}
+                  onAttachToIssue={(msg) => setAttachMsgs([msg])}
+                  onSaveMessage={toggleSaveMessage}
+                  saved={savedIds.has(m.id)}
+                  onScheduleReminder={setReminderMsg}
                   onStartSelect={startSelection}
                   onToggleSelect={toggleSelect}
                   onAvatarClick={(actorId, displayName) => setProfileUser({ actorId, displayName })}
@@ -3204,6 +3982,8 @@ function ChatWindow({
         onCancelReply={() => setReplyTo(null)}
         editValue={editTarget ? resolveMessageText(editTarget) : undefined}
         onCancelEdit={() => setEditTarget(null)}
+        roomName={room.displayName}
+        suggestContext={suggestContext}
       />
 
       {profileUser && (
@@ -3243,6 +4023,22 @@ function ChatWindow({
       )}
 
       {forwardMsgs && <ForwardDialog msgs={forwardMsgs} onClose={() => setForwardMsgs(null)} />}
+      {attachMsgs && (
+        <AttachNoteDialog
+          msgs={attachMsgs}
+          roomName={room.displayName}
+          onClose={() => setAttachMsgs(null)}
+          onOpenIssue={onIssueClick}
+        />
+      )}
+      {reminderMsg && (
+        <ReminderDialog
+          msg={reminderMsg}
+          roomToken={room.token}
+          roomName={room.displayName}
+          onClose={() => setReminderMsg(null)}
+        />
+      )}
 
       {taskInitial && (
         <CreateIssueModal
@@ -4220,6 +5016,183 @@ function MyStatusMenu({ onClose }: { onClose: () => void }) {
 
 // ─── Painel de conversas ──────────────────────────────────────────────────────
 
+// ─── Painel de mensagens salvas + agendamentos ───────────────────────────────
+
+function SavedScheduledPanel({
+  rooms,
+  onSelect,
+  onClose,
+}: {
+  rooms: TalkRoom[];
+  onSelect: (room: TalkRoom) => void;
+  onClose: () => void;
+}) {
+  const [tab, setTab] = useState<'saved' | 'scheduled'>('saved');
+  const [saved, setSaved] = useState(() => talkSaved.all());
+  useEffect(() => {
+    const s = () => setSaved(talkSaved.all());
+    window.addEventListener(talkSaved.EVENT, s);
+    return () => window.removeEventListener(talkSaved.EVENT, s);
+  }, []);
+  const { data: scheduled = [], refetch } = useQuery({
+    queryKey: ['scheduled-items'],
+    queryFn: listScheduled,
+    staleTime: 10_000,
+  });
+
+  const openRoom = (token: string) => {
+    const r = rooms.find((x) => x.token === token);
+    if (r) {
+      onSelect(r);
+      onClose();
+    }
+  };
+  const cancel = async (id: string) => {
+    await cancelScheduled(id);
+    refetch();
+  };
+
+  const Tab = ({
+    id,
+    label,
+    count,
+  }: {
+    id: 'saved' | 'scheduled';
+    label: string;
+    count: number;
+  }) => (
+    <button
+      onClick={() => setTab(id)}
+      className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium border-b-2 transition-colors ${
+        tab === id
+          ? 'border-blue-500 text-blue-600'
+          : 'border-transparent text-slate-400 hover:text-slate-600'
+      }`}
+    >
+      {label}
+      {count > 0 && (
+        <span className="text-[9px] bg-slate-100 text-slate-500 rounded-full px-1.5 py-0.5">
+          {count}
+        </span>
+      )}
+    </button>
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-80 max-h-[75vh] flex flex-col bg-white rounded-2xl shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+          <span className="text-sm font-semibold text-slate-800">Salvos e agendados</span>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+          >
+            <X size={14} />
+          </button>
+        </div>
+        <div className="flex border-b border-slate-100 flex-shrink-0">
+          <Tab id="saved" label="Salvos" count={saved.length} />
+          <Tab id="scheduled" label="Agendados" count={scheduled.length} />
+        </div>
+
+        <div className="flex-1 overflow-y-auto scrollbar-thin">
+          {tab === 'saved' && (
+            <>
+              {saved.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-10 gap-2 text-slate-400">
+                  <Bookmark size={22} />
+                  <span className="text-xs">Nenhuma mensagem salva</span>
+                  <span className="text-[10px] px-6 text-center">
+                    Use “Salvar mensagem” no menu de uma bolha para guardá-la aqui.
+                  </span>
+                </div>
+              )}
+              {saved.map((m) => (
+                <div
+                  key={`${m.roomToken}-${m.id}`}
+                  className="flex items-start gap-2 px-4 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 group"
+                >
+                  <BookmarkCheck size={13} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                  <button
+                    onClick={() => openRoom(m.roomToken)}
+                    className="flex-1 min-w-0 text-left"
+                  >
+                    <p className="text-xs text-slate-700 line-clamp-2">
+                      <span className="font-semibold">{m.author}: </span>
+                      {m.text}
+                    </p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      {m.roomName} · {format(new Date(m.savedAt), "dd/MM 'às' HH:mm")}
+                    </p>
+                  </button>
+                  <button
+                    onClick={() => talkSaved.remove(m.roomToken, m.id)}
+                    title="Remover"
+                    className="flex-shrink-0 p-0.5 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              ))}
+            </>
+          )}
+
+          {tab === 'scheduled' && (
+            <>
+              {scheduled.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-10 gap-2 text-slate-400">
+                  <Clock size={22} />
+                  <span className="text-xs">Nada agendado</span>
+                  <span className="text-[10px] px-6 text-center">
+                    Agende mensagens pelo relógio ao lado do envio, ou crie lembretes no menu da
+                    bolha.
+                  </span>
+                </div>
+              )}
+              {scheduled.map((it) => (
+                <div
+                  key={it.id}
+                  className="flex items-start gap-2 px-4 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 group"
+                >
+                  {it.type === 'reminder' ? (
+                    <Clock size={13} className="text-purple-500 flex-shrink-0 mt-0.5" />
+                  ) : (
+                    <Send size={12} className="text-blue-500 flex-shrink-0 mt-0.5" />
+                  )}
+                  <button
+                    onClick={() => openRoom(it.roomToken)}
+                    className="flex-1 min-w-0 text-left"
+                  >
+                    <p className="text-xs text-slate-700 line-clamp-2">{it.text}</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      {it.type === 'reminder' ? 'Lembrete' : 'Mensagem'}
+                      {it.roomName ? ` · ${it.roomName}` : ''} ·{' '}
+                      {format(new Date(it.fireAt), "dd/MM 'às' HH:mm")}
+                    </p>
+                  </button>
+                  <button
+                    onClick={() => cancel(it.id)}
+                    title="Cancelar"
+                    className="flex-shrink-0 p-0.5 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ConversationsPanel({
   onSelect,
   openTokens,
@@ -4238,6 +5211,7 @@ function ConversationsPanel({
   const { data: me } = useTalkCurrentUser();
   const [showNewConv, setShowNewConv] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
+  const [showSaved, setShowSaved] = useState(false);
   const myStatus = statuses?.get(myId)?.status;
 
   const sorted = rooms.filter((r) => r.type !== 6).sort((a, b) => b.lastActivity - a.lastActivity);
@@ -4257,6 +5231,13 @@ function ConversationsPanel({
               onSelect(room);
               setShowNewConv(false);
             }}
+          />
+        )}
+        {showSaved && (
+          <SavedScheduledPanel
+            rooms={rooms}
+            onSelect={onSelect}
+            onClose={() => setShowSaved(false)}
           />
         )}
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 flex-shrink-0 relative">
@@ -4298,6 +5279,13 @@ function ConversationsPanel({
                 )}
               </button>
             )}
+            <button
+              onClick={() => setShowSaved(true)}
+              className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-blue-600 transition-colors"
+              title="Salvos e agendados"
+            >
+              <Bookmark size={14} />
+            </button>
             <button
               onClick={() => setShowNewConv(true)}
               className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-blue-600 transition-colors"
