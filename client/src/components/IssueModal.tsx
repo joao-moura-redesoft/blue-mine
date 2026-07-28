@@ -46,6 +46,8 @@ import { localChecklists, useChecklist } from '../utils/localChecklists';
 import { TimeTracker } from './TimeTracker';
 import { IssueAIPanel } from './IssueAIPanel';
 import { CommentComposer } from './CommentComposer';
+import { TalkContactButton } from './TalkContactButton';
+import { PersonAvatar } from './PersonAvatar';
 import { MarkdownEditor } from './MarkdownEditor';
 import { markdownToTextile } from '../utils/markdownToTextile';
 import { textileToMarkdown } from '../utils/textileToMarkdown';
@@ -216,6 +218,10 @@ interface Props {
   onNewNote?: (patch: { title?: string; linkedIssueId?: number; linkedProjectId?: number }) => void;
   /** Abre o módulo de Notas filtrado por esta tarefa */
   onViewNotes?: (issueId: number) => void;
+  /** Abre (ou cria) a conversa 1:1 no Talk com o usuário do Nextcloud dado */
+  onOpenTalk?: (ncUid: string) => void;
+  /** ncUid da conversa sendo aberta agora (spinner no botão), ou null */
+  openingTalkFor?: string | null;
 }
 
 /* Tamanho de arquivo legível */
@@ -234,7 +240,7 @@ function TaskAttachments({ attachments }: { attachments: Attachment[] }) {
   const images = attachments.filter((a) => a.content_type?.startsWith('image/'));
   const files = attachments.filter((a) => !a.content_type?.startsWith('image/'));
   return (
-    <div className="mt-3 pt-3 border-t border-slate-100">
+    <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">
       <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-2">
         <Paperclip size={12} /> Anexos da tarefa ({attachments.length})
       </div>
@@ -251,7 +257,7 @@ function TaskAttachments({ attachments }: { attachments: Attachment[] }) {
               <img
                 src={attUrl(a)}
                 alt={a.filename}
-                className="rounded-lg border border-slate-200 w-32 h-[88px] object-cover hover:border-blue-300 transition-colors"
+                className="rounded-lg border border-slate-200 dark:border-slate-700 w-32 h-[88px] object-cover hover:border-blue-300 transition-colors"
               />
             </a>
           ))}
@@ -264,7 +270,7 @@ function TaskAttachments({ attachments }: { attachments: Attachment[] }) {
             href={attUrl(a)}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 hover:border-blue-300"
+            className="inline-flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 dark:text-slate-300 hover:border-blue-300"
           >
             <File size={15} className="text-slate-400" />
             <span className="max-w-48 truncate">{a.filename}</span>
@@ -361,10 +367,10 @@ function DescriptionPanel({
   const imgCount = attachments.filter((a) => a.content_type?.startsWith('image/')).length;
   const fileCount = attachments.length - imgCount;
   return (
-    <div className="border-b border-slate-100 bg-slate-50/40 group">
+    <div className="border-b border-slate-100 dark:border-slate-700 bg-slate-50/40 dark:bg-slate-900/40 group">
       <button
         onClick={onToggle}
-        className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-slate-500 hover:bg-slate-100 transition-colors"
+        className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
       >
         <ChevronRight
           size={14}
@@ -393,7 +399,7 @@ function DescriptionPanel({
               e.stopPropagation();
               onEdit();
             }}
-            className="ml-2 p-0.5 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
+            className="ml-2 p-0.5 rounded text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
             title="Editar descrição"
           >
             <Pencil size={11} />
@@ -403,7 +409,7 @@ function DescriptionPanel({
       {open && (
         <div className="px-4 pb-3">
           {description && (
-            <div className="bg-white rounded-lg p-3 border border-slate-100 group">
+            <div className="bg-white dark:bg-slate-800 rounded-lg p-3 border border-slate-100 dark:border-slate-700 group">
               <Markdown text={description} attachments={attachments} textile />
             </div>
           )}
@@ -444,7 +450,9 @@ function FieldRow({
   return (
     <div className="flex items-start gap-2.5 px-5 py-2">
       <span className="text-slate-400 mt-0.5 flex-shrink-0">{icon}</span>
-      <span className="text-xs font-medium text-slate-500 w-32 flex-shrink-0 mt-0.5">{label}</span>
+      <span className="text-xs font-medium text-slate-500 dark:text-slate-400 w-32 flex-shrink-0 mt-0.5">
+        {label}
+      </span>
       <div className="flex-1 min-w-0">{children}</div>
     </div>
   );
@@ -484,21 +492,21 @@ function StatusField({
       {!bare && <FieldLabel>Situação</FieldLabel>}
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 text-sm font-medium text-slate-800 hover:text-blue-600 transition-colors"
+        className="flex items-center gap-1 text-sm font-medium text-slate-800 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
       >
         {currentName} <ChevronDown size={12} className="text-slate-400" />
       </button>
       {noTransitions && (
-        <p className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
+        <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5 flex items-center gap-1">
           <span>⚠</span> Sem transições permitidas no workflow
         </p>
       )}
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute top-full left-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 min-w-52 py-1 max-h-60 overflow-y-auto scrollbar-thin">
+          <div className="absolute top-full left-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-20 min-w-52 py-1 max-h-60 overflow-y-auto scrollbar-thin">
             {noTransitions && (
-              <p className="px-3 py-2 text-xs text-amber-600 border-b border-slate-100">
+              <p className="px-3 py-2 text-xs text-amber-600 dark:text-amber-400 border-b border-slate-100 dark:border-slate-700">
                 Workflow não permite transições para este tracker/perfil.
               </p>
             )}
@@ -516,7 +524,7 @@ function StatusField({
                     setOpen(false);
                   }}
                   className={`w-full flex items-center justify-between px-3 py-1.5 text-sm transition-colors
-                  ${s.id === currentId ? 'font-semibold text-blue-600 bg-blue-50' : 'hover:bg-blue-50 text-slate-700'}
+                  ${s.id === currentId ? 'font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20' : 'hover:bg-blue-50 dark:hover:bg-blue-900/20 text-slate-700 dark:text-slate-200'}
                 `}
                 >
                   <span>{s.name}</span>
@@ -570,7 +578,7 @@ function TextField({
         if (!multiline && e.key === 'Enter') commit();
       },
       className:
-        'w-full text-sm text-slate-800 border border-blue-400 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none bg-white',
+        'w-full text-sm text-slate-800 dark:text-slate-100 border border-blue-400 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none bg-white dark:bg-slate-800',
     };
     return (
       <div>
@@ -591,13 +599,13 @@ function TextField({
         className="group flex items-start gap-1 text-left w-full"
       >
         <span
-          className={`text-sm font-medium ${value ? 'text-slate-800' : 'text-slate-300 italic'} group-hover:text-blue-600 transition-colors leading-snug`}
+          className={`text-sm font-medium ${value ? 'text-slate-800 dark:text-slate-100' : 'text-slate-300 dark:text-slate-600 italic'} group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors leading-snug`}
         >
           {value || '—'}
         </span>
         <Pencil
           size={11}
-          className="text-slate-300 group-hover:text-blue-400 mt-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+          className="text-slate-300 dark:text-slate-600 group-hover:text-blue-400 mt-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
         />
       </button>
     </div>
@@ -670,7 +678,7 @@ function BranchField({
             }
             if (e.key === 'Enter') commit();
           }}
-          className="w-full text-sm font-mono text-slate-800 border border-blue-400 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
+          className="w-full text-sm font-mono text-slate-800 dark:text-slate-100 border border-blue-400 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white dark:bg-slate-800"
         />
       </div>
     );
@@ -689,22 +697,22 @@ function BranchField({
             className="group flex items-center gap-1 min-w-0"
             title="Editar"
           >
-            <span className="text-sm font-medium font-mono text-slate-800 group-hover:text-blue-600 truncate">
+            <span className="text-sm font-medium font-mono text-slate-800 dark:text-slate-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 truncate">
               {value}
             </span>
             <Pencil
               size={11}
-              className="text-slate-300 group-hover:text-blue-400 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+              className="text-slate-300 dark:text-slate-600 group-hover:text-blue-400 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
             />
           </button>
           <div className="flex items-center gap-0.5 flex-shrink-0">
             <button
               onClick={() => copy(value, 'branch')}
               title="Copiar nome da branch"
-              className="p-1 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50"
+              className="p-1 rounded text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
             >
               {copied === 'branch' ? (
-                <Check size={12} className="text-green-600" />
+                <Check size={12} className="text-green-600 dark:text-green-400" />
               ) : (
                 <Copy size={12} />
               )}
@@ -712,9 +720,13 @@ function BranchField({
             <button
               onClick={() => copy(`git checkout ${value}`, 'cmd')}
               title="Copiar 'git checkout'"
-              className="px-1 py-0.5 rounded text-[10px] font-mono font-semibold text-slate-400 hover:text-blue-600 hover:bg-blue-50"
+              className="px-1 py-0.5 rounded text-[10px] font-mono font-semibold text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
             >
-              {copied === 'cmd' ? <Check size={12} className="text-green-600" /> : 'git'}
+              {copied === 'cmd' ? (
+                <Check size={12} className="text-green-600 dark:text-green-400" />
+              ) : (
+                'git'
+              )}
             </button>
           </div>
         </div>
@@ -725,14 +737,14 @@ function BranchField({
               setDraft('');
               setEditing(true);
             }}
-            className="text-sm text-slate-300 italic hover:text-blue-600"
+            className="text-sm text-slate-300 dark:text-slate-600 italic hover:text-blue-600 dark:hover:text-blue-400"
           >
             —
           </button>
           <button
             onClick={() => onSave(makeBranchName(issueId, userFirstName, subject))}
             title={`Sugerir: ${makeBranchName(issueId, userFirstName, subject)}`}
-            className="text-[11px] text-blue-600 hover:bg-blue-50 px-1.5 py-0.5 rounded inline-flex items-center gap-1"
+            className="text-[11px] text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 px-1.5 py-0.5 rounded inline-flex items-center gap-1"
           >
             <GitBranch size={11} /> sugerir
           </button>
@@ -767,25 +779,27 @@ function SelectField({
           setSearch('');
           setOpen((v) => !v);
         }}
-        className="flex items-center gap-1 text-sm font-medium text-slate-800 hover:text-blue-600 transition-colors"
+        className="flex items-center gap-1 text-sm font-medium text-slate-800 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
       >
-        <span className={value ? '' : 'text-slate-300 italic'}>{value || '—'}</span>
+        <span className={value ? '' : 'text-slate-300 dark:text-slate-600 italic'}>
+          {value || '—'}
+        </span>
         <ChevronDown size={12} className="text-slate-400" />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div
-            className="absolute top-full left-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 w-64 flex flex-col"
+            className="absolute top-full left-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-20 w-64 flex flex-col"
             style={{ maxHeight: 240 }}
           >
-            <div className="p-2 border-b border-slate-100">
+            <div className="p-2 border-b border-slate-100 dark:border-slate-700">
               <input
                 autoFocus
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Filtrar..."
-                className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                className="w-full text-xs border border-slate-200 dark:border-slate-700 dark:bg-slate-900 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-400"
                 onClick={(e) => e.stopPropagation()}
               />
             </div>
@@ -795,7 +809,7 @@ function SelectField({
                   onSave('');
                   setOpen(false);
                 }}
-                className="w-full text-left px-3 py-1.5 text-sm text-slate-400 hover:bg-slate-50"
+                className="w-full text-left px-3 py-1.5 text-sm text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50"
               >
                 — Nenhum
               </button>
@@ -806,7 +820,7 @@ function SelectField({
                     onSave(o);
                     setOpen(false);
                   }}
-                  className={`w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-blue-50 ${o === value ? 'font-semibold text-blue-600' : 'text-slate-700'}`}
+                  className={`w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-blue-50 dark:hover:bg-blue-900/20 ${o === value ? 'font-semibold text-blue-600 dark:text-blue-400' : 'text-slate-700 dark:text-slate-200'}`}
                 >
                   {o} {o === value && <Check size={12} />}
                 </button>
@@ -861,10 +875,10 @@ function HoursField({
               if (e.key === 'Enter') commit();
               if (e.key === 'Escape') setEditing(false);
             }}
-            className="w-20 text-sm border border-blue-400 rounded-md px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
+            className="w-20 text-sm border border-blue-400 rounded-md px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white dark:bg-slate-800"
             placeholder="0"
           />
-          <span className="text-xs text-slate-500">horas</span>
+          <span className="text-xs text-slate-500 dark:text-slate-400">horas</span>
         </div>
       </div>
     );
@@ -884,13 +898,15 @@ function HoursField({
           setEditing(true);
         }}
         className={`group flex items-center gap-1.5 text-sm font-medium transition-colors ${
-          required ? 'text-red-500 hover:text-red-600' : 'text-slate-800 hover:text-blue-600'
+          required
+            ? 'text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300'
+            : 'text-slate-800 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400'
         }`}
       >
         {value != null ? (
           `${value}h`
         ) : (
-          <span className="italic text-slate-300">Não preenchido</span>
+          <span className="italic text-slate-300 dark:text-slate-600">Não preenchido</span>
         )}
         <Pencil
           size={11}
@@ -925,7 +941,7 @@ function DateField({
         onChange={(e) => {
           if (e.target.value.length === 10) onSave(e.target.value);
         }}
-        className="text-sm font-medium text-slate-800 border border-transparent hover:border-slate-300 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1.5 py-0.5 cursor-pointer transition-colors"
+        className="text-sm font-medium text-slate-800 dark:text-slate-100 border border-transparent hover:border-slate-300 dark:hover:border-slate-600 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1.5 py-0.5 cursor-pointer transition-colors"
       />
     </div>
   );
@@ -985,7 +1001,7 @@ function UserField({
           setSearch('');
           setOpen((v) => !v);
         }}
-        className="flex items-center gap-1 text-sm font-medium text-slate-800 hover:text-blue-600 transition-colors"
+        className="flex items-center gap-1 text-sm font-medium text-slate-800 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
       >
         {displayName} <ChevronDown size={12} className="text-slate-400" />
       </button>
@@ -999,16 +1015,16 @@ function UserField({
             }}
           />
           <div
-            className="absolute top-full left-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 w-60 flex flex-col"
+            className="absolute top-full left-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-20 w-60 flex flex-col"
             style={{ maxHeight: 300 }}
           >
-            <div className="p-2 border-b border-slate-100 flex-shrink-0">
+            <div className="p-2 border-b border-slate-100 dark:border-slate-700 flex-shrink-0">
               <input
                 autoFocus
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Buscar pessoa..."
-                className="w-full text-xs border border-slate-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                className="w-full text-xs border border-slate-200 dark:border-slate-700 dark:bg-slate-900 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
                 onClick={(e) => e.stopPropagation()}
               />
             </div>
@@ -1019,7 +1035,7 @@ function UserField({
                   setOpen(false);
                   setSearch('');
                 }}
-                className="w-full text-left px-3 py-1.5 text-sm text-slate-400 hover:bg-slate-50"
+                className="w-full text-left px-3 py-1.5 text-sm text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50"
               >
                 — Nenhum
               </button>
@@ -1028,8 +1044,11 @@ function UserField({
               )}
               {teams.map((team) => (
                 <div key={team}>
-                  <p className="px-3 pt-2 pb-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400 bg-slate-50/70 sticky top-0">
-                    {team} <span className="text-slate-300">({grouped[team].length})</span>
+                  <p className="px-3 pt-2 pb-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400 bg-slate-50/70 dark:bg-slate-900/40 sticky top-0">
+                    {team}{' '}
+                    <span className="text-slate-300 dark:text-slate-600">
+                      ({grouped[team].length})
+                    </span>
                   </p>
                   {grouped[team].map((u) => (
                     <button
@@ -1039,7 +1058,7 @@ function UserField({
                         setOpen(false);
                         setSearch('');
                       }}
-                      className={`w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-blue-50 ${String(u.id) === String(value) ? 'font-semibold text-blue-600' : 'text-slate-700'}`}
+                      className={`w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-blue-50 dark:hover:bg-blue-900/20 ${String(u.id) === String(value) ? 'font-semibold text-blue-600 dark:text-blue-400' : 'text-slate-700 dark:text-slate-200'}`}
                     >
                       {u.name} {String(u.id) === String(value) && <Check size={12} />}
                     </button>
@@ -1081,8 +1100,8 @@ function StartDevCTA({
   }
 
   return (
-    <div className="border border-green-200 bg-green-50 rounded-lg p-3 space-y-2">
-      <p className="text-xs font-semibold text-green-800 flex items-center gap-1.5">
+    <div className="border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/30 rounded-lg p-3 space-y-2">
+      <p className="text-xs font-semibold text-green-800 dark:text-green-300 flex items-center gap-1.5">
         <GitBranch size={13} /> Branch para desenvolvimento:
       </p>
       <input
@@ -1091,7 +1110,7 @@ function StartDevCTA({
         value={branch}
         onChange={(e) => setBranch(e.target.value)}
         placeholder="ex: #090604-feature-nome"
-        className="w-full text-sm border border-green-300 rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 bg-white"
+        className="w-full text-sm border border-green-300 dark:border-green-700 rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 bg-white dark:bg-slate-800"
         onKeyDown={(e) => {
           if (e.key === 'Enter' && branch.trim()) {
             onConfirm(branch.trim());
@@ -1103,7 +1122,7 @@ function StartDevCTA({
       <div className="flex gap-2 justify-end">
         <button
           onClick={() => setOpen(false)}
-          className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1"
+          className="text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 px-2 py-1"
         >
           Cancelar
         </button>
@@ -1156,15 +1175,19 @@ function SendToReviewCTA({
   }
 
   return (
-    <div className="border border-purple-200 bg-purple-50 rounded-lg p-3 space-y-3">
-      <p className="text-xs font-semibold text-purple-800">Confirme antes de enviar:</p>
+    <div className="border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/30 rounded-lg p-3 space-y-3">
+      <p className="text-xs font-semibold text-purple-800 dark:text-purple-300">
+        Confirme antes de enviar:
+      </p>
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="text-xs text-purple-700 font-medium block mb-1">Revisor *</label>
+          <label className="text-xs text-purple-700 dark:text-purple-300 font-medium block mb-1">
+            Revisor *
+          </label>
           <select
             value={revisor}
             onChange={(e) => setRevisor(e.target.value)}
-            className="w-full text-sm border border-purple-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-400 bg-white"
+            className="w-full text-sm border border-purple-300 dark:border-purple-700 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-400 bg-white dark:bg-slate-800"
           >
             <option value="">Selecionar...</option>
             {members.map((m) => (
@@ -1175,21 +1198,21 @@ function SendToReviewCTA({
           </select>
         </div>
         <div>
-          <label className="text-xs text-purple-700 font-medium block mb-1">
+          <label className="text-xs text-purple-700 dark:text-purple-300 font-medium block mb-1">
             Previsão de Envio *
           </label>
           <input
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
-            className="w-full text-sm border border-purple-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-400"
+            className="w-full text-sm border border-purple-300 dark:border-purple-700 dark:bg-slate-800 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-400"
           />
         </div>
       </div>
       <div className="flex gap-2 justify-end">
         <button
           onClick={() => setOpen(false)}
-          className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1"
+          className="text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 px-2 py-1"
         >
           Cancelar
         </button>
@@ -1234,12 +1257,12 @@ function ReviewDecisionCTA({
 
   if (mode === 'approve') {
     return (
-      <div className="border border-green-200 bg-green-50 rounded-lg p-3 space-y-3">
-        <p className="text-xs font-semibold text-green-800">
+      <div className="border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/30 rounded-lg p-3 space-y-3">
+        <p className="text-xs font-semibold text-green-800 dark:text-green-300">
           Aprovar e enviar para integração{integratorName ? ` · ${integratorName}` : ''}:
         </p>
         <div>
-          <label className="text-xs text-green-700 font-medium block mb-1">
+          <label className="text-xs text-green-700 dark:text-green-300 font-medium block mb-1">
             Mensagem para o integrador *
           </label>
           <textarea
@@ -1248,13 +1271,13 @@ function ReviewDecisionCTA({
             onChange={(e) => setNote(e.target.value)}
             rows={2}
             placeholder="Ex: Revisado, pode integrar."
-            className="w-full text-sm border border-green-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 bg-white resize-none"
+            className="w-full text-sm border border-green-300 dark:border-green-700 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 bg-white dark:bg-slate-800 resize-none"
           />
         </div>
         <div className="flex gap-2 justify-end">
           <button
             onClick={() => setMode(null)}
-            className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1"
+            className="text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 px-2 py-1"
           >
             Cancelar
           </button>
@@ -1274,14 +1297,18 @@ function ReviewDecisionCTA({
 
   if (mode === 'reject') {
     return (
-      <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 space-y-3">
-        <p className="text-xs font-semibold text-amber-800">Reprovar e devolver para correção:</p>
+      <div className="border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 rounded-lg p-3 space-y-3">
+        <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+          Reprovar e devolver para correção:
+        </p>
         <div>
-          <label className="text-xs text-amber-700 font-medium block mb-1">Devolver para *</label>
+          <label className="text-xs text-amber-700 dark:text-amber-400 font-medium block mb-1">
+            Devolver para *
+          </label>
           <select
             value={assignee}
             onChange={(e) => setAssignee(e.target.value)}
-            className="w-full text-sm border border-amber-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
+            className="w-full text-sm border border-amber-300 dark:border-amber-700 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white dark:bg-slate-800"
           >
             <option value="">Selecionar...</option>
             {members.map((m) => (
@@ -1292,7 +1319,7 @@ function ReviewDecisionCTA({
           </select>
         </div>
         <div>
-          <label className="text-xs text-amber-700 font-medium block mb-1">
+          <label className="text-xs text-amber-700 dark:text-amber-400 font-medium block mb-1">
             Motivo (vira comentário)
           </label>
           <textarea
@@ -1300,13 +1327,13 @@ function ReviewDecisionCTA({
             onChange={(e) => setNote(e.target.value)}
             rows={2}
             placeholder="O que precisa ser corrigido?"
-            className="w-full text-sm border border-amber-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white resize-none"
+            className="w-full text-sm border border-amber-300 dark:border-amber-700 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white dark:bg-slate-800 resize-none"
           />
         </div>
         <div className="flex gap-2 justify-end">
           <button
             onClick={() => setMode(null)}
-            className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1"
+            className="text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 px-2 py-1"
           >
             Cancelar
           </button>
@@ -1345,7 +1372,7 @@ function ReviewDecisionCTA({
             setNote('');
             setMode('reject');
           }}
-          className="flex-1 flex items-center justify-center gap-2 py-2 px-4 bg-white border border-amber-300 text-amber-700 hover:bg-amber-50 text-sm font-semibold rounded-lg transition-colors"
+          className="flex-1 flex items-center justify-center gap-2 py-2 px-4 bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 text-sm font-semibold rounded-lg transition-colors"
         >
           <RotateCcw size={14} />
           Reprovar
@@ -1384,13 +1411,13 @@ function ReviewChecklist({ issueId }: { issueId: number }) {
     setChecked((c) => (c.includes(i) ? c.filter((x) => x !== i) : [...c, i]));
 
   return (
-    <div className="border border-slate-200 rounded-lg p-3 mb-2 bg-white">
-      <p className="text-xs font-semibold text-slate-600 mb-2 flex items-center gap-1.5">
+    <div className="border border-slate-200 dark:border-slate-700 rounded-lg p-3 mb-2 bg-white dark:bg-slate-800">
+      <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2 flex items-center gap-1.5">
         <CheckSquare size={13} /> Checklist de revisão
         <span className="text-slate-400 font-normal">
           {checked.length}/{REVIEW_ITEMS.length}
         </span>
-        <span className="ml-auto text-[10px] text-slate-300">local</span>
+        <span className="ml-auto text-[10px] text-slate-300 dark:text-slate-600">local</span>
       </p>
       <div className="space-y-1">
         {REVIEW_ITEMS.map((item, i) => (
@@ -1401,12 +1428,16 @@ function ReviewChecklist({ issueId }: { issueId: number }) {
             className="w-full flex items-center gap-2 text-sm text-left"
           >
             <span
-              className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${checked.includes(i) ? 'bg-blue-600 border-blue-600' : 'border-slate-300'}`}
+              className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${checked.includes(i) ? 'bg-blue-600 border-blue-600' : 'border-slate-300 dark:border-slate-600'}`}
             >
               {checked.includes(i) && <Check size={11} className="text-white" />}
             </span>
             <span
-              className={checked.includes(i) ? 'text-slate-400 line-through' : 'text-slate-700'}
+              className={
+                checked.includes(i)
+                  ? 'text-slate-400 line-through'
+                  : 'text-slate-700 dark:text-slate-200'
+              }
             >
               {item}
             </span>
@@ -1429,9 +1460,9 @@ function ChecklistSection({ issueId }: { issueId: number }) {
   };
 
   return (
-    <div className="px-5 py-3 border-b border-slate-100">
+    <div className="px-5 py-3 border-b border-slate-100 dark:border-slate-700">
       <div className="flex items-center justify-between mb-2">
-        <span className="flex items-center gap-2 text-xs font-medium text-slate-500">
+        <span className="flex items-center gap-2 text-xs font-medium text-slate-500 dark:text-slate-400">
           <CheckSquare size={13} /> Checklist
           {items.length > 0 && (
             <span className="text-slate-400">
@@ -1440,7 +1471,7 @@ function ChecklistSection({ issueId }: { issueId: number }) {
           )}
         </span>
         <span
-          className="text-[10px] text-slate-300"
+          className="text-[10px] text-slate-300 dark:text-slate-600"
           title="Salvo só neste navegador, não vai para o Redmine"
         >
           local
@@ -1456,19 +1487,19 @@ function ChecklistSection({ issueId }: { issueId: number }) {
                 className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition-colors ${
                   item.done
                     ? 'bg-blue-600 border-blue-600'
-                    : 'border-slate-300 hover:border-blue-400'
+                    : 'border-slate-300 dark:border-slate-600 hover:border-blue-400'
                 }`}
               >
                 {item.done && <Check size={11} className="text-white" />}
               </button>
               <span
-                className={`text-sm flex-1 ${item.done ? 'text-slate-400 line-through' : 'text-slate-700'}`}
+                className={`text-sm flex-1 ${item.done ? 'text-slate-400 line-through' : 'text-slate-700 dark:text-slate-200'}`}
               >
                 {item.text}
               </span>
               <button
                 onClick={() => localChecklists.remove(issueId, item.id)}
-                className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                className="text-slate-300 dark:text-slate-600 hover:text-red-500 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
                 title="Remover"
               >
                 <X size={13} />
@@ -1486,12 +1517,12 @@ function ChecklistSection({ issueId }: { issueId: number }) {
             if (e.key === 'Enter') add();
           }}
           placeholder="Adicionar item…"
-          className="flex-1 text-sm border border-slate-200 rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-400"
+          className="flex-1 text-sm border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-400"
         />
         <button
           onClick={add}
           disabled={!text.trim()}
-          className="p-1.5 rounded-md bg-slate-100 text-slate-500 hover:bg-blue-100 hover:text-blue-600 disabled:opacity-40"
+          className="p-1.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 hover:text-blue-600 dark:hover:text-blue-400 disabled:opacity-40"
         >
           <Plus size={14} />
         </button>
@@ -1535,14 +1566,14 @@ function RelatedIssues({
     <button
       onClick={() => onNavigate?.(id)}
       disabled={!onNavigate}
-      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-blue-50 transition-colors text-left group disabled:cursor-default"
+      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors text-left group disabled:cursor-default"
     >
       <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wide w-24 flex-shrink-0">
         {label}
       </span>
       <span className="text-xs font-medium text-slate-400 flex-shrink-0">#{id}</span>
       {text && (
-        <span className="text-xs text-slate-700 group-hover:text-blue-600 truncate flex-1">
+        <span className="text-xs text-slate-700 dark:text-slate-200 group-hover:text-blue-600 dark:group-hover:text-blue-400 truncate flex-1">
           {text}
         </span>
       )}
@@ -1550,15 +1581,15 @@ function RelatedIssues({
   );
 
   return (
-    <div className="px-5 py-3 border-b border-slate-100">
-      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+    <div className="px-5 py-3 border-b border-slate-100 dark:border-slate-700">
+      <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
         <Link2 size={12} /> Relacionadas
       </p>
       <div className="space-y-0.5">
         {hasParent && <Row id={issue.parent!.id} label="Tarefa pai" />}
         {children.map((c) => (
           <div key={c.id} className="flex items-center gap-1">
-            <GitMerge size={11} className="text-slate-300 ml-1 flex-shrink-0" />
+            <GitMerge size={11} className="text-slate-300 dark:text-slate-600 ml-1 flex-shrink-0" />
             <Row id={c.id} label="Subtarefa" text={c.subject} />
           </div>
         ))}
@@ -1597,7 +1628,7 @@ function WikiLinksSection({ issueId }: { issueId: number }) {
   return (
     <div className="px-4 pt-3 pb-1">
       <div className="flex items-center justify-between mb-2">
-        <p className="text-xs font-medium text-slate-500 flex items-center gap-1.5">
+        <p className="text-xs font-medium text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
           <BookOpen size={12} />
           Wiki
         </p>
@@ -1627,14 +1658,14 @@ function WikiLinksSection({ issueId }: { issueId: number }) {
               href={`https://wiki.redesoft.com.br/doku.php?id=${encodeURIComponent(link.id)}`}
               target="_blank"
               rel="noreferrer"
-              className="text-slate-300 hover:text-blue-500 flex-shrink-0 transition-colors"
+              className="text-slate-300 dark:text-slate-600 hover:text-blue-500 dark:hover:text-blue-400 flex-shrink-0 transition-colors"
               title="Abrir no DokuWiki"
             >
               <ExternalLink size={11} />
             </a>
             <button
               onClick={() => handleRemove(link.id)}
-              className="text-slate-300 hover:text-red-400 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all"
+              className="text-slate-300 dark:text-slate-600 hover:text-red-400 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all"
               title="Desvincular"
             >
               <X size={11} />
@@ -1652,7 +1683,15 @@ function WikiLinksSection({ issueId }: { issueId: number }) {
 
 /* ── Modal principal ── */
 
-export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNotes }: Props) {
+export function IssueModal({
+  issueId,
+  onClose,
+  onNavigate,
+  onNewNote,
+  onViewNotes,
+  onOpenTalk,
+  openingTalkFor,
+}: Props) {
   const { data: issue, isLoading } = useIssueDetail(issueId);
   // Registra como "recente" pro command palette quando a tarefa carrega.
   useEffect(() => {
@@ -2023,18 +2062,18 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
         onClick={requestClose}
       >
         <div
-          className="bg-white rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col"
+          className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col"
           onClick={onModalClick}
         >
           {/* Header */}
-          <div className="flex items-start justify-between p-5 pb-3 border-b border-slate-200">
+          <div className="flex items-start justify-between p-5 pb-3 border-b border-slate-200 dark:border-slate-700">
             <div className="flex-1 min-w-0 pr-4">
               {isLoading ? (
-                <div className="h-5 bg-slate-200 animate-pulse rounded w-3/4" />
+                <div className="h-5 bg-slate-200 dark:bg-slate-700/50 animate-pulse rounded w-3/4" />
               ) : (
                 <>
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                    <span className="text-xs font-medium text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
                       #{issue?.id} · {issue?.tracker.name}
                     </span>
                     <span className="text-xs text-slate-400">{issue?.project.name}</span>
@@ -2042,13 +2081,13 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                       href={`https://redmine.b2click.com/issues/${issue?.id}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-blue-400 hover:text-blue-600"
+                      className="text-blue-400 hover:text-blue-600 dark:hover:text-blue-400"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <ExternalLink size={11} />
                     </a>
                   </div>
-                  <h2 className="text-base font-semibold text-slate-900 leading-snug">
+                  <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100 leading-snug">
                     {issue?.subject}
                   </h2>
                 </>
@@ -2130,7 +2169,7 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                     })
                   }
                   title="Criar nota sobre esta tarefa"
-                  className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-slate-100 text-slate-500 hover:bg-slate-200 transition-colors"
+                  className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
                 >
                   <NotebookPen size={13} /> Nota
                 </button>
@@ -2146,8 +2185,8 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                       title={isWatching ? 'Deixar de observar' : 'Observar esta tarefa'}
                       className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                         isWatching
-                          ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                          : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                          ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
                       }`}
                     >
                       <Star
@@ -2161,9 +2200,9 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
 
               <button
                 onClick={requestClose}
-                className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
+                className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
               >
-                <X size={18} className="text-slate-500" />
+                <X size={18} className="text-slate-500 dark:text-slate-400" />
               </button>
             </div>
           </div>
@@ -2174,7 +2213,7 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
               {[...Array(5)].map((_, i) => (
                 <div
                   key={i}
-                  className="h-4 bg-slate-200 animate-pulse rounded"
+                  className="h-4 bg-slate-200 dark:bg-slate-700/50 animate-pulse rounded"
                   style={{ width: `${80 - i * 8}%` }}
                 />
               ))}
@@ -2212,8 +2251,8 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                         key={f.key}
                         className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${
                           f.status === 'saving'
-                            ? 'bg-slate-100 text-slate-500'
-                            : 'bg-red-50 text-red-600'
+                            ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                            : 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400'
                         }`}
                       >
                         {f.status === 'saving' ? (
@@ -2229,7 +2268,7 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                 )}
 
                 {/* Campos editáveis — agrupados, 1 coluna com ícones */}
-                <div className="border-b border-slate-100 bg-slate-50/70 pb-2 divide-y divide-slate-100/80">
+                <div className="border-b border-slate-100 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/40 pb-2 divide-y divide-slate-100/80 dark:divide-slate-700/80">
                   {/* GERAL */}
                   <div>
                     <SectionHeader>Geral</SectionHeader>
@@ -2252,7 +2291,7 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                               const days = (Date.now() - since.getTime()) / 86400000;
                               return (
                                 <p
-                                  className={`text-[11px] mt-0.5 flex items-center gap-1 ${days > 5 ? 'text-amber-600' : 'text-slate-400'}`}
+                                  className={`text-[11px] mt-0.5 flex items-center gap-1 ${days > 5 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400'}`}
                                 >
                                   <Clock size={10} /> há{' '}
                                   {formatDistanceToNow(since, { locale: ptBR })} nesta etapa
@@ -2264,7 +2303,7 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                             if (rej === 0) return null;
                             return (
                               <p
-                                className="text-[11px] mt-0.5 flex items-center gap-1 text-red-500"
+                                className="text-[11px] mt-0.5 flex items-center gap-1 text-red-500 dark:text-red-400"
                                 title="Vezes que voltou para Pendente Correção"
                               >
                                 <RotateCcw size={10} /> reprovada {rej}×
@@ -2275,18 +2314,27 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                       </FieldRow>
                     )}
                     <FieldRow icon={<User size={14} />} label="Atribuído para">
-                      <UserField
-                        bare
-                        label="Atribuído para"
-                        value={issue.assigned_to ? String(issue.assigned_to.id) : ''}
-                        users={members ?? []}
-                        fallbackName={issue.assigned_to?.name}
-                        onSave={(v) =>
-                          trackField('assigned_to', 'Atribuído para', {
-                            assigned_to_id: v ? parseInt(v) : '',
-                          })
-                        }
-                      />
+                      <div className="flex items-center gap-1">
+                        <UserField
+                          bare
+                          label="Atribuído para"
+                          value={issue.assigned_to ? String(issue.assigned_to.id) : ''}
+                          users={members ?? []}
+                          fallbackName={issue.assigned_to?.name}
+                          onSave={(v) =>
+                            trackField('assigned_to', 'Atribuído para', {
+                              assigned_to_id: v ? parseInt(v) : '',
+                            })
+                          }
+                        />
+                        {onOpenTalk && issue.assigned_to && (
+                          <TalkContactButton
+                            redmineUserId={issue.assigned_to.id}
+                            onOpenTalk={onOpenTalk}
+                            openingTalkFor={openingTalkFor}
+                          />
+                        )}
+                      </div>
                     </FieldRow>
                     <FieldRow icon={<Clock size={14} />} label="Tempo estimado">
                       <HoursField
@@ -2381,7 +2429,7 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                   if (missing.length === 0) return null;
                   return (
                     <div className="px-4 pt-3">
-                      <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
+                      <div className="flex items-start gap-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
                         <AlertCircle size={13} className="mt-0.5 flex-shrink-0" />
                         <span>
                           Antes de avançar, preencha: <strong>{missing.join(', ')}</strong>
@@ -2467,7 +2515,9 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                   !isClosedName(issue.status.name) &&
                   (allowedStatuses?.filter((s) => s.id !== issue.status.id).length ?? 0) > 0 && (
                     <div className="px-4 pt-3">
-                      <p className="text-xs font-medium text-slate-500 mb-1.5">Avançar para:</p>
+                      <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">
+                        Avançar para:
+                      </p>
                       <div className="flex flex-wrap gap-2">
                         {allowedStatuses!
                           .filter((s) => s.id !== issue.status.id)
@@ -2475,7 +2525,7 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                             <button
                               key={s.id}
                               onClick={() => updateField({ status_id: s.id })}
-                              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 text-slate-700 hover:border-blue-400 hover:text-blue-600 text-sm font-medium rounded-lg transition-colors"
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 text-sm font-medium rounded-lg transition-colors"
                             >
                               <ArrowRight size={13} /> {s.name}
                             </button>
@@ -2581,7 +2631,7 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                       className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-md transition-colors ${
                         histView
                           ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                          : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                          : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
                       }`}
                       title="Mostrar histórico completo: mudanças de status, atribuições e demais alterações"
                     >
@@ -2600,12 +2650,12 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                         className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-md transition-colors ${
                           phaseView
                             ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                            : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                            : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
                         }`}
                         title="Agrupar comentários por status"
                       >
                         <span
-                          className={`w-1.5 h-1.5 rounded-full ${phaseView ? 'bg-blue-500' : 'bg-slate-300'}`}
+                          className={`w-1.5 h-1.5 rounded-full ${phaseView ? 'bg-blue-500' : 'bg-slate-300 dark:bg-slate-600'}`}
                         />
                         Fases
                       </button>
@@ -2657,12 +2707,16 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                                 const isMine = journal.user.id === currentUser?.id;
                                 return (
                                   <div key={journal.id} className="flex gap-3 group">
-                                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-0.5">
-                                      {journal.user.name.charAt(0).toUpperCase()}
-                                    </div>
+                                    <PersonAvatar
+                                      redmineUserId={journal.user.id}
+                                      name={journal.user.name}
+                                      size={28}
+                                      className="mt-0.5 text-xs"
+                                      onOpenTalk={onOpenTalk}
+                                    />
                                     <div className="flex-1 min-w-0">
                                       <div className="flex items-center gap-2 mb-1">
-                                        <span className="text-xs font-semibold text-slate-700">
+                                        <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
                                           {journal.user.name}
                                         </span>
                                         <span className="text-xs text-slate-400">
@@ -2680,7 +2734,7 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                                                 original: textileToMarkdown(journal.notes),
                                               })
                                             }
-                                            className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50"
+                                            className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
                                             title="Editar comentário"
                                           >
                                             <Pencil size={12} />
@@ -2769,12 +2823,16 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                         const isMine = journal.user.id === currentUser?.id;
                         return (
                           <div key={journal.id} className="flex gap-3 group">
-                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-0.5">
-                              {journal.user.name.charAt(0).toUpperCase()}
-                            </div>
+                            <PersonAvatar
+                              redmineUserId={journal.user.id}
+                              name={journal.user.name}
+                              size={28}
+                              className="mt-0.5 text-xs"
+                              onOpenTalk={onOpenTalk}
+                            />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-1">
-                                <span className="text-xs font-semibold text-slate-700">
+                                <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
                                   {journal.user.name}
                                 </span>
                                 <span className="text-xs text-slate-400">
@@ -2792,7 +2850,7 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                                         original: textileToMarkdown(journal.notes),
                                       })
                                     }
-                                    className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50"
+                                    className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
                                     title="Editar comentário"
                                   >
                                     <Pencil size={12} />
@@ -2846,7 +2904,7 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                                 </div>
                               ) : (
                                 <>
-                                  <div className="bg-slate-50 border border-slate-100 rounded-xl rounded-tl-sm px-3 py-2">
+                                  <div className="bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl rounded-tl-sm px-3 py-2">
                                     <Markdown
                                       text={journal.notes}
                                       attachments={issue.attachments}
@@ -2870,8 +2928,8 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                         <div
                           className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5 ${
                             pending.status === 'pending'
-                              ? 'bg-slate-200 text-slate-500'
-                              : 'bg-red-100 text-red-500'
+                              ? 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+                              : 'bg-red-100 dark:bg-red-900/30 text-red-500 dark:text-red-400'
                           }`}
                         >
                           {currentUser
@@ -2892,18 +2950,18 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                               </span>
                             )}
                             {pending.status === 'error' && (
-                              <span className="flex items-center gap-1 text-xs text-red-500">
+                              <span className="flex items-center gap-1 text-xs text-red-500 dark:text-red-400">
                                 <AlertCircle size={10} />
                                 {pending.error ? 'Não foi possível salvar' : 'Falhou ao enviar'}
                                 <button
                                   onClick={() => retryNote(pending)}
-                                  className="flex items-center gap-0.5 underline hover:text-red-700 ml-1"
+                                  className="flex items-center gap-0.5 underline hover:text-red-700 dark:hover:text-red-300 ml-1"
                                 >
                                   <RotateCcw size={10} /> Tentar novamente
                                 </button>
                                 <button
                                   onClick={() => dismissNote(pending.id)}
-                                  className="text-slate-400 hover:text-slate-600 ml-1"
+                                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 ml-1"
                                 >
                                   <X size={10} />
                                 </button>
@@ -2911,15 +2969,15 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                             )}
                           </div>
                           {pending.status === 'error' && pending.error && (
-                            <p className="text-[11px] text-red-500 mb-1 whitespace-pre-wrap">
+                            <p className="text-[11px] text-red-500 dark:text-red-400 mb-1 whitespace-pre-wrap">
                               ⚠ {pending.error}
                             </p>
                           )}
                           <div
                             className={`rounded-xl rounded-tl-sm px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap transition-colors ${
                               pending.status === 'pending'
-                                ? 'bg-slate-100 text-slate-500 border border-slate-200'
-                                : 'bg-red-50 text-slate-700 border border-red-200'
+                                ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
+                                : 'bg-red-50 dark:bg-red-950/30 text-slate-700 dark:text-slate-200 border border-red-200 dark:border-red-800'
                             }`}
                           >
                             {pending.text}
@@ -2937,10 +2995,13 @@ export function IssueModal({ issueId, onClose, onNavigate, onNewNote, onViewNote
                   </div>
                 </div>
                 {/* Composer fixo no rodapé do painel de chat */}
-                <div className="p-3 border-t border-slate-200 bg-slate-50">
+                <div className="p-3 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40">
                   {blockingErrors.length > 0 && (
                     <div className="mb-2 flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-2.5 py-1.5">
-                      <AlertCircle size={13} className="flex-shrink-0 mt-0.5 text-amber-500" />
+                      <AlertCircle
+                        size={13}
+                        className="flex-shrink-0 mt-0.5 text-amber-500 dark:text-amber-400"
+                      />
                       <span>
                         <strong>
                           O Redmine não deixa salvar comentário nesta tarefa enquanto houver

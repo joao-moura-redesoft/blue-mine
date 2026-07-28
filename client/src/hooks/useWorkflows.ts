@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import {
   fetchWorkflows,
   createWorkflow,
@@ -6,12 +6,45 @@ import {
   deleteWorkflow,
   fetchWorkflowRuns,
   triggerWorkflow,
+  fetchWorkflowNotifications,
   type Workflow,
   type WorkflowPatch,
 } from '../api/workflows';
 import { getStoredAuth } from '../api/redmine';
 
 const KEY = ['workflows'];
+const NOTIF_KEY = ['workflows', 'notifications'];
+
+// Depois de um disparo manual ("Testar" / botão de execução real), força o sino
+// a refletir na hora em vez de esperar o próximo poll (20s). `invalidateQueries`
+// sozinho não basta: se a busca inicial dessa query (disparada junto com o app)
+// ainda estiver em voo, o React Query reaproveita essa MESMA requisição pendente
+// — que partiu ANTES do disparo — em vez de abrir uma nova, e o evento novo
+// nunca apareceria. Pior: buscar e escrever direto no cache sem esperar também
+// não basta sozinho, porque aquela requisição antiga, ao resolver mais tarde,
+// SOBRESCREVE nosso dado fresco com o snapshot antigo. Por isso espera qualquer
+// fetch em andamento terminar antes de buscar e escrever.
+export async function refreshWorkflowNotifications(qc: QueryClient) {
+  if (qc.getQueryState(NOTIF_KEY)?.fetchStatus === 'fetching') {
+    await new Promise<void>((resolve) => {
+      const unsubscribe = qc.getQueryCache().subscribe((event) => {
+        const k = event.query.queryKey;
+        if (k.length === NOTIF_KEY.length && k.every((v: unknown, i: number) => v === NOTIF_KEY[i])) {
+          if (event.query.state.fetchStatus !== 'fetching') {
+            unsubscribe();
+            resolve();
+          }
+        }
+      });
+    });
+  }
+  try {
+    const fresh = await fetchWorkflowNotifications();
+    qc.setQueryData(NOTIF_KEY, fresh);
+  } catch {
+    qc.invalidateQueries({ queryKey: NOTIF_KEY });
+  }
+}
 
 // Histórico de execução de um workflow. Enquanto o painel está aberto, atualiza
 // a cada 8s para refletir disparos recentes.
@@ -90,9 +123,10 @@ export function useTriggerWorkflow() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, issueId }: { id: string; issueId?: number }) => triggerWorkflow(id, issueId),
-    onSuccess: (_data, { id }) => {
+    onSuccess: async (_data, { id }) => {
       qc.invalidateQueries({ queryKey: ['workflow-runs', id] });
       qc.invalidateQueries({ queryKey: KEY });
+      await refreshWorkflowNotifications(qc);
     },
   });
 }

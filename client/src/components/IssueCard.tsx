@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useRef, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import {
@@ -52,12 +53,22 @@ function QuickStatusMenu({
   issue,
   statuses,
   onStatusChange,
+  onOpenChange,
 }: {
   issue: Issue;
   statuses: IssueStatus[];
   onStatusChange: (issueId: number, statusId: number) => void;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setRawOpen] = useState(false);
+  const setOpen = (v: boolean | ((prev: boolean) => boolean)) =>
+    setRawOpen((prev) => {
+      const next = typeof v === 'function' ? v(prev) : v;
+      onOpenChange?.(next);
+      return next;
+    });
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const { data: currentUser } = useCurrentUser();
   // Transições permitidas: buscadas sob demanda (só quando o menu abre), iguais
   // ao Redmine. Cacheadas por workflow, então cards no mesmo estado não refazem.
@@ -80,9 +91,30 @@ function QuickStatusMenu({
     ? statuses.filter((s) => allowedIds.includes(s.id) || s.id === issue.status.id)
     : statuses;
 
+  // Posiciona o menu via portal (fixed), evitando clipping/sobreposição pelos
+  // cards vizinhos — o transform do dnd-kit cria um stacking context no card.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const r = btnRef.current?.getBoundingClientRect();
+      if (!r) return;
+      const menuW = 208; // w-52
+      const left = Math.min(r.left, window.innerWidth - menuW - 8);
+      setMenuPos({ top: r.bottom + 4, left: Math.max(8, left) });
+    };
+    place();
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [open]);
+
   return (
     <div className="relative" onPointerDown={(e) => e.stopPropagation()}>
       <button
+        ref={btnRef}
         onClick={(e) => {
           e.stopPropagation();
           setOpen((v) => !v);
@@ -93,16 +125,21 @@ function QuickStatusMenu({
         <ArrowLeftRight size={11} />
         Status
       </button>
-      {open && (
+      {open && menuPos && createPortal(
         <>
           <div
-            className="fixed inset-0 z-20"
+            className="fixed inset-0 z-[90]"
             onClick={(e) => {
               e.stopPropagation();
               setOpen(false);
             }}
+            onPointerDown={(e) => e.stopPropagation()}
           />
-          <div className="absolute left-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl z-30 w-52 py-1 max-h-52 overflow-y-auto scrollbar-thin">
+          <div
+            className="fixed bg-white border border-slate-200 rounded-lg shadow-xl z-[91] w-52 py-1 max-h-52 overflow-y-auto scrollbar-thin"
+            style={{ top: menuPos.top, left: menuPos.left }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
             {loading && (
               <p className="px-3 py-2 text-xs text-slate-400 flex items-center gap-1.5">
                 <Loader2 size={11} className="animate-spin" /> Carregando transições…
@@ -131,7 +168,8 @@ function QuickStatusMenu({
                 </button>
               ))}
           </div>
-        </>
+        </>,
+        document.body,
       )}
     </div>
   );
@@ -424,6 +462,10 @@ export function IssueCard({
   // Pré-carrega os detalhes ao passar o mouse, pra o modal abrir instantâneo.
   const handlePrefetch = navigable && !isDragOverlay ? () => prefetchIssue(issue.id) : undefined;
 
+  // Menu de status é renderizado em portal (fora do card): mantém a linha de
+  // ações visível enquanto aberto, já que o hover do card se perde no portal.
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
+
   const style = transform ? { transform: CSS.Translate.toString(transform) } : undefined;
 
   const missingFields = getMissingFields(issue);
@@ -626,14 +668,18 @@ export function IssueCard({
         />
       )}
 
-      {/* Ações rápidas — aparecem no hover */}
+      {/* Ações rápidas — reforçadas no hover, mas nunca invisíveis: sem isso ficam
+          inacessíveis em telas touch (o app roda como PWA), que não têm hover. */}
       {!isDragOverlay && (statuses || branch || onArchive || onTimerStart) && (
-        <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-slate-100 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+        <div
+          className={`flex items-center gap-1.5 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 transition-opacity duration-150 ${statusMenuOpen ? 'opacity-100' : 'opacity-40 group-hover:opacity-100'}`}
+        >
           {statuses && onQuickStatusChange && (
             <QuickStatusMenu
               issue={issue}
               statuses={statuses}
               onStatusChange={onQuickStatusChange}
+              onOpenChange={setStatusMenuOpen}
             />
           )}
           {branch && <CopyBranchButton branch={branch} />}

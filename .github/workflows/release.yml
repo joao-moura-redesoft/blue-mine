@@ -1,26 +1,44 @@
 name: 'Auto Release'
 
-# Ao empurrar uma tag v* (ou publicar um Release), builda o executável via Node
-# SEA (fora do Node 18 EOL) e sobe bluemine.exe + SHA256SUMS. O auto-update do app
-# (provider github, UPDATE_GITHUB_REPO) consome esse Release e confere o SHA-256
-# antes de aplicar.
+# Gera o bluemine.exe (Node SEA, fora do Node 18 EOL) e sobe bluemine.exe +
+# SHA256SUMS num GitHub Release. O auto-update do app (provider github,
+# UPDATE_GITHUB_REPO) consome o Release "latest" e confere o SHA-256 antes de aplicar.
+#
+# Três formas de disparar:
+#   • push na main         → release AUTOMÁTICO, versão 1.0.<nº de commits> (sem tag manual);
+#   • push de tag v*       → release com a versão da tag (ex.: v1.2.0 → 1.2.0);
+#   • Run workflow / release publicado → sob demanda.
+#
+# A versão do exe TEM de aumentar a cada build, senão o updater (compareVersions em
+# server/services/updater.js) não detecta novidade. Por isso, no push da main, o patch
+# vem do total de commits (git rev-list --count) — monotônico e sem bump manual.
 on:
-  release:
-    types: [published]
   push:
+    branches: ['main']
     tags:
       - 'v*'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# Um build de release por vez por ref; um push novo na main cancela o anterior
+# (não desperdiça runner Windows num commit já superado — a tag só é criada no fim).
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-release:
     name: Build & Upload Executable
     runs-on: windows-latest
     permissions:
-      contents: write # Needed to upload assets to releases
+      contents: write # criar o Release/tag e subir os assets
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # histórico completo: `git rev-list --count` precisa de tudo
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -34,19 +52,31 @@ jobs:
         run: npm install
         working-directory: ./client
 
-      # Deriva a versão da própria tag (v1.2.0 → 1.2.0) e grava no package.json
-      # ANTES do build — assim o exe embute a versão certa (é o que o app compara
-      # com o release) sem depender de um bump manual prévio.
-      - name: Set version from tag
+      # Resolve a versão e grava no package.json (raiz + client) ANTES do build, para
+      # o exe embutir a versão certa (é o que o app compara com o Release).
+      #   • tag v* → usa a versão da tag;
+      #   • push na main / dispatch → MAJOR.MINOR do package.json + total de commits.
+      - name: Resolve version
+        id: ver
         shell: pwsh
         run: |
-          $tag = "${{ github.event.release.tag_name || github.ref_name }}"
-          $ver = $tag -replace '^v', ''
-          if ($ver -notmatch '^\d+\.\d+\.\d+') {
-            Write-Error "Tag '$tag' não é uma versão semântica (esperado vX.Y.Z)."; exit 1
+          $ref = "${{ github.ref }}"
+          if ($ref -like 'refs/tags/v*') {
+            $ver = "${{ github.ref_name }}" -replace '^v', ''
+            if ($ver -notmatch '^\d+\.\d+\.\d+') {
+              Write-Error "Tag '${{ github.ref_name }}' não é vX.Y.Z."; exit 1
+            }
+          } else {
+            $base = ((node -p "require('./package.json').version") -split '\.')[0..1] -join '.'
+            $count = "$(git rev-list --count HEAD)".Trim()
+            $ver = "$base.$count"
+          }
+          if ($ver -notmatch '^\d+\.\d+\.\d+$') {
+            Write-Error "Versão resolvida inválida: '$ver'"; exit 1
           }
           npm version $ver --no-git-tag-version --allow-same-version
           npm version $ver --no-git-tag-version --allow-same-version --prefix client
+          "version=$ver" >> $env:GITHUB_OUTPUT
           Write-Host "Versão definida: $ver"
 
       - name: Build Executable (Node SEA)
@@ -60,15 +90,19 @@ jobs:
           "$h  bluemine.exe" | Out-File -Encoding ascii -NoNewline SHA256SUMS
           Write-Host "SHA256: $h"
 
-      - name: Upload Release Assets
+      # Cria (ou atualiza) o Release e a tag vX.Y.Z apontando para este commit, e
+      # sobe os assets. make_latest garante que o updater pegue este como "latest".
+      - name: Publish Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
         with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: v${{ steps.ver.outputs.version }}
           files: |
             bluemine.exe
             SHA256SUMS
           fail_on_unmatched_files: true
           generate_release_notes: true
+          make_latest: 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

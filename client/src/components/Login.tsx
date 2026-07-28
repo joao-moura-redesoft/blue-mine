@@ -69,22 +69,24 @@ export function Login({ onSuccess }: Props) {
       : username.trim().length > 0 && password.length > 0);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-100 to-blue-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-slate-100 to-blue-50 dark:from-slate-950 dark:to-slate-900 flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="flex flex-col items-center mb-8">
           <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-blue-700 rounded-2xl flex items-center justify-center shadow-lg mb-4">
             <Gem size={28} className="text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-slate-900">Bluemine</h1>
-          <p className="text-sm text-slate-500 mt-1">Entre com suas credenciais do Redmine</p>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Bluemine</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            Entre com suas credenciais do Redmine
+          </p>
         </div>
 
         {/* Card */}
-        <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-6 space-y-5">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-6 space-y-5">
           {/* URL */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1.5">
               URL do Redmine
             </label>
             <input
@@ -93,13 +95,13 @@ export function Login({ onSuccess }: Props) {
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://redmine.suaempresa.com"
               autoFocus
-              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500"
               onKeyDown={(e) => e.key === 'Enter' && canSubmit && validate()}
             />
           </div>
 
           {/* Toggle de modo */}
-          <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+          <div className="flex rounded-lg border border-slate-200 dark:border-slate-700 p-0.5 bg-slate-50 dark:bg-slate-900/40">
             <button
               type="button"
               onClick={() => {
@@ -108,8 +110,8 @@ export function Login({ onSuccess }: Props) {
               }}
               className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium rounded-md transition-all ${
                 mode === 'token'
-                  ? 'bg-white text-blue-600 shadow-sm border border-slate-200'
-                  : 'text-slate-500 hover:text-slate-700'
+                  ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm border border-slate-200 dark:border-slate-700'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
               }`}
             >
               <KeyRound size={13} />
@@ -123,8 +125,8 @@ export function Login({ onSuccess }: Props) {
               }}
               className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium rounded-md transition-all ${
                 mode === 'userpass'
-                  ? 'bg-white text-blue-600 shadow-sm border border-slate-200'
-                  : 'text-slate-500 hover:text-slate-700'
+                  ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm border border-slate-200 dark:border-slate-700'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
               }`}
             >
               <User size={13} />
@@ -135,7 +137,7 @@ export function Login({ onSuccess }: Props) {
           {/* Campos por modo */}
           {mode === 'token' ? (
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1.5">
                 Chave de API
               </label>
               <div className="relative">
@@ -144,24 +146,24 @@ export function Login({ onSuccess }: Props) {
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   placeholder="••••••••••••••••••••••••••••••••••••••••"
-                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono"
+                  className="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5 pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500"
                   onKeyDown={(e) => e.key === 'Enter' && canSubmit && validate()}
                 />
                 <button
                   type="button"
                   onClick={() => setShowSecret((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 transition-colors"
                 >
                   {showSecret ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
-              <p className="text-xs text-slate-400 mt-1.5 flex items-center gap-1">
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-1.5 flex items-center gap-1">
                 Encontre em
                 <a
                   href={`${url.length > 10 ? url : 'https://redmine'}/my/account`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-500 hover:underline inline-flex items-center gap-0.5"
+                  className="text-blue-500 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5"
                 >
                   Minha conta → Chave de acesso API
                   <ExternalLink size={11} />
@@ -171,19 +173,23 @@ export function Login({ onSuccess }: Props) {
           ) : (
             <div className="space-y-3">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Usuário</label>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1.5">
+                  Usuário
+                </label>
                 <input
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="seu.usuario"
                   autoComplete="username"
-                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500"
                   onKeyDown={(e) => e.key === 'Enter' && canSubmit && validate()}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Senha</label>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1.5">
+                  Senha
+                </label>
                 <div className="relative">
                   <input
                     type={showSecret ? 'text' : 'password'}
@@ -191,13 +197,13 @@ export function Login({ onSuccess }: Props) {
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••••••"
                     autoComplete="current-password"
-                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5 pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500"
                     onKeyDown={(e) => e.key === 'Enter' && canSubmit && validate()}
                   />
                   <button
                     type="button"
                     onClick={() => setShowSecret((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 transition-colors"
                   >
                     {showSecret ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
@@ -208,7 +214,7 @@ export function Login({ onSuccess }: Props) {
 
           {/* Erro */}
           {error && (
-            <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+            <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">
               <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
@@ -231,7 +237,7 @@ export function Login({ onSuccess }: Props) {
           </button>
         </div>
 
-        <p className="text-center text-xs text-slate-400 mt-4">
+        <p className="text-center text-xs text-slate-400 dark:text-slate-500 mt-4">
           As credenciais ficam salvas apenas neste navegador.
         </p>
       </div>

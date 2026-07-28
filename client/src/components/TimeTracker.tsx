@@ -81,21 +81,23 @@ export function TimeTracker({ issueId, spentHours }: Props) {
   };
 
   return (
-    <div className="px-5 py-3 border-b border-slate-100">
+    <div className="px-5 py-3 border-b border-slate-100 dark:border-slate-700">
       {/* Header row */}
       <div className="flex items-center justify-between mb-2">
-        <span className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+        <span className="flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
           <Clock size={13} />
           Horas
           {justLogged != null ? (
-            <span className="flex items-center gap-1 text-green-600 font-medium">
+            <span className="flex items-center gap-1 text-green-600 dark:text-green-400 font-medium">
               <Check size={12} /> {fmtH(justLogged)} apontada{justLogged === 1 ? '' : 's'}{' '}
               automaticamente
             </span>
           ) : (
             spentHours != null &&
             spentHours > 0 && (
-              <span className="text-slate-400 font-normal">· {fmtH(spentHours)} registradas</span>
+              <span className="text-slate-400 dark:text-slate-500 font-normal">
+                · {fmtH(spentHours)} registradas
+              </span>
             )
           )}
         </span>
@@ -106,9 +108,9 @@ export function TimeTracker({ issueId, spentHours }: Props) {
             <button
               onClick={handleStopAndLog}
               title="Parar e apontar as horas automaticamente"
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs font-medium hover:bg-red-100 transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-xs font-medium hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors"
             >
-              <Square size={11} className="fill-red-600" />
+              <Square size={11} className="fill-red-600 dark:fill-red-400" />
               {timer.formatted}
             </button>
           ) : (
@@ -120,7 +122,7 @@ export function TimeTracker({ issueId, spentHours }: Props) {
                   ? `Timer ativo em outra tarefa (#${timer.activeIssueId})`
                   : 'Iniciar timer'
               }
-              className="flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-200 text-slate-500 text-xs hover:bg-green-50 hover:border-green-300 hover:text-green-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 text-xs hover:bg-green-50 dark:hover:bg-green-900/30 hover:border-green-300 dark:hover:border-green-700 hover:text-green-600 dark:hover:text-green-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               <Play size={11} className="fill-current" />
               {otherRunning ? `#${timer.activeIssueId}` : 'Timer'}
@@ -132,7 +134,7 @@ export function TimeTracker({ issueId, spentHours }: Props) {
             onClick={() => {
               setFormOpen((v) => !v);
             }}
-            className="flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-200 text-slate-500 text-xs hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600 transition-colors"
+            className="flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 text-xs hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-300 dark:hover:border-blue-700 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
             title="Registrar horas manualmente"
           >
             <Plus size={11} />
@@ -143,10 +145,10 @@ export function TimeTracker({ issueId, spentHours }: Props) {
 
       {/* Log form */}
       {formOpen && (
-        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-2 space-y-2">
+        <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700 rounded-lg p-3 mb-2 space-y-2">
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide block mb-1">
+              <label className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide block mb-1">
                 Horas *
               </label>
               <input
@@ -157,17 +159,17 @@ export function TimeTracker({ issueId, spentHours }: Props) {
                 value={hours}
                 onChange={(e) => setHours(e.target.value)}
                 placeholder="ex: 1.5"
-                className="w-full text-sm border border-slate-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+                className="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white dark:bg-slate-800 dark:text-slate-100"
               />
             </div>
             <div>
-              <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide block mb-1">
+              <label className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide block mb-1">
                 Atividade *
               </label>
               <select
                 value={activityId}
                 onChange={(e) => setActivityId(Number(e.target.value))}
-                className="w-full text-sm border border-slate-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+                className="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white dark:bg-slate-800 dark:text-slate-100"
               >
                 {activities?.map((a) => (
                   <option key={a.id} value={a.id}>
@@ -179,18 +181,18 @@ export function TimeTracker({ issueId, spentHours }: Props) {
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide block mb-1">
+              <label className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide block mb-1">
                 Data
               </label>
               <input
                 type="date"
                 value={spentOn}
                 onChange={(e) => setSpentOn(e.target.value)}
-                className="w-full text-sm border border-slate-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+                className="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white dark:bg-slate-800 dark:text-slate-100"
               />
             </div>
             <div>
-              <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide block mb-1">
+              <label className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide block mb-1">
                 Comentário
               </label>
               <input
@@ -202,14 +204,14 @@ export function TimeTracker({ issueId, spentHours }: Props) {
                   if (e.key === 'Escape') setFormOpen(false);
                 }}
                 placeholder="Opcional"
-                className="w-full text-sm border border-slate-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+                className="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white dark:bg-slate-800 dark:text-slate-100"
               />
             </div>
           </div>
           <div className="flex justify-end gap-2">
             <button
               onClick={() => setFormOpen(false)}
-              className="text-xs text-slate-400 hover:text-slate-600 px-2 py-1"
+              className="text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 px-2 py-1"
             >
               Cancelar
             </button>
@@ -230,7 +232,9 @@ export function TimeTracker({ issueId, spentHours }: Props) {
             </button>
           </div>
           {createEntry.isError && (
-            <p className="text-xs text-red-500">Erro ao registrar horas. Tente novamente.</p>
+            <p className="text-xs text-red-500 dark:text-red-400">
+              Erro ao registrar horas. Tente novamente.
+            </p>
           )}
         </div>
       )}
@@ -240,7 +244,7 @@ export function TimeTracker({ issueId, spentHours }: Props) {
         <div>
           <button
             onClick={() => setShowEntries((v) => !v)}
-            className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 transition-colors"
+            className="flex items-center gap-1 text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
           >
             <ChevronDown
               size={12}
@@ -252,15 +256,22 @@ export function TimeTracker({ issueId, spentHours }: Props) {
           {showEntries && (
             <div className="mt-1.5 space-y-1">
               {entries!.slice(0, 8).map((e) => (
-                <div key={e.id} className="flex items-center gap-2 text-xs text-slate-600">
-                  <span className="font-semibold text-slate-700 w-8 flex-shrink-0">
+                <div
+                  key={e.id}
+                  className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300"
+                >
+                  <span className="font-semibold text-slate-700 dark:text-slate-200 w-8 flex-shrink-0">
                     {fmtH(e.hours)}
                   </span>
-                  <span className="text-slate-400 flex-shrink-0">{e.activity.name}</span>
+                  <span className="text-slate-400 dark:text-slate-500 flex-shrink-0">
+                    {e.activity.name}
+                  </span>
                   {e.comments && (
-                    <span className="text-slate-500 truncate flex-1">{e.comments}</span>
+                    <span className="text-slate-500 dark:text-slate-400 truncate flex-1">
+                      {e.comments}
+                    </span>
                   )}
-                  <span className="text-slate-300 flex-shrink-0 ml-auto">
+                  <span className="text-slate-300 dark:text-slate-600 flex-shrink-0 ml-auto">
                     {formatDistanceToNow(parseSpentOn(e.spent_on), {
                       addSuffix: true,
                       locale: ptBR,
@@ -274,7 +285,7 @@ export function TimeTracker({ issueId, spentHours }: Props) {
       )}
 
       {entriesLoading && (
-        <div className="flex items-center gap-1.5 text-xs text-slate-400">
+        <div className="flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500">
           <Loader2 size={11} className="animate-spin" /> Carregando registros…
         </div>
       )}

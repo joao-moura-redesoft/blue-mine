@@ -7,6 +7,7 @@ import {
   type SavedFilter,
 } from '../utils/savedFilters';
 import { useProjects } from '../hooks/useRedmine';
+import { ConfirmDialog } from './workflow/ConfirmDialog';
 
 const ALERT_LABELS: Record<string, string> = {
   overdue: 'Vencidas',
@@ -31,6 +32,7 @@ export function SavedFiltersBar({ currentFilter, onApply }: Props) {
   const [filters, setFilters] = useState<SavedFilter[]>(loadSavedFilters);
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState<SavedFilter | null>(null);
   const { data: projects } = useProjects();
 
   const refresh = () => setFilters(loadSavedFilters());
@@ -43,8 +45,12 @@ export function SavedFiltersBar({ currentFilter, onApply }: Props) {
     setSaving(false);
   };
 
-  const handleDelete = (id: string, e: React.MouseEvent) => {
+  const requestDelete = (f: SavedFilter, e: React.MouseEvent) => {
     e.stopPropagation();
+    setConfirmDelete(f);
+  };
+
+  const handleDelete = (id: string) => {
     removeFilter(id);
     refresh();
   };
@@ -85,13 +91,24 @@ export function SavedFiltersBar({ currentFilter, onApply }: Props) {
           </span>
           <span
             role="button"
-            onClick={(e) => handleDelete(f.id, e)}
+            onClick={(e) => requestDelete(f, e)}
             className="ml-0.5 p-0.5 rounded-full text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors flex-shrink-0"
           >
             <X size={10} />
           </span>
         </button>
       ))}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title={`Apagar filtro "${confirmDelete.name}"?`}
+          message="Só remove o atalho salvo — os filtros ativos na tela não mudam."
+          confirmLabel="Apagar"
+          danger
+          onConfirm={() => handleDelete(confirmDelete.id)}
+          onClose={() => setConfirmDelete(null)}
+        />
+      )}
 
       {saving ? (
         <div className="flex items-center gap-1.5">

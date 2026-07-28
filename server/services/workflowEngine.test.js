@@ -66,6 +66,28 @@ describe('runGraph — filtro', () => {
   });
 });
 
+describe('runGraph — ação notify', () => {
+  const notify = (id, nextIds = []) => ({
+    id,
+    kind: 'action',
+    type: 'notify',
+    config: { title: 'Tarefa parada', body: 'Sem atividade há 5 dias' },
+    nextIds,
+  });
+
+  it('grava título/corpo/tarefa no run log mesmo sem inscrição push (sino não depende do push)', async () => {
+    const wf = { id: 'w', nodes: [{ ...trigger, nextIds: ['n'] }, notify('n')] };
+    const r = run();
+    // subscriptions = [] → sem inscrição push; ainda assim a ação não deve falhar
+    // nem deixar de registrar o conteúdo (é o que alimenta o sino in-app).
+    await runGraph(wf, wf.nodes[0], ctx(), rec, noop, [], { run: r });
+    expect(r.actions).toEqual([
+      { type: 'notify', ok: true, title: 'Tarefa parada', body: 'Sem atividade há 5 dias', issueId: 1 },
+    ]);
+    expect(r.nodes.n).toBe('ok');
+  });
+});
+
 describe('runGraph — branch (Se/senão)', () => {
   const branch = (value) => ({
     id: 'b',

@@ -779,8 +779,15 @@ async function runGraph(
         mark(id, 'ok');
       } else {
         try {
-          await execAction(node, ctx, rec, sendPush, subscriptions, { test: !!bypassFilters });
-          if (run) run.actions.push({ type: node.type, ok: true });
+          const result = await execAction(node, ctx, rec, sendPush, subscriptions, {
+            test: !!bypassFilters,
+          });
+          if (run)
+            run.actions.push({
+              type: node.type,
+              ok: true,
+              ...(result && typeof result === 'object' ? result : {}),
+            });
           mark(id, 'ok');
         } catch (e) {
           const msg = e.response?.data?.errors?.join?.('; ') || e.response?.status || e.message;
@@ -813,9 +820,6 @@ async function execAction(node, ctx, rec, sendPush, subscriptions, { test } = {}
 
   switch (node.type) {
     case 'notify': {
-      const recs = pushRecsFor(rec, subscriptions);
-      if (recs.length === 0)
-        return void console.warn('[workflow] notify: sem inscrição push p/ uid', rec.uid);
       // A tag identifica a notificação: com a MESMA tag, o service worker substitui
       // a anterior. Numa varredura que avisa 5 tarefas, um `tag` fixo por nó
       // deixaria só a última visível — por isso entra o id da tarefa/mensagem.
@@ -826,9 +830,17 @@ async function execAction(node, ctx, rec, sendPush, subscriptions, { test } = {}
         tag: subject ? `wf-${node.id}-${subject}` : `wf-${node.id}`,
         ...(ctx.issue?.id ? { url: `/?issue=${ctx.issue.id}`, issueId: ctx.issue.id } : {}),
       };
-      // Fan-out para todos os dispositivos do usuário (o digest já faz assim).
-      for (const r of recs) await sendPush(r, payload);
-      return;
+      // O sino (notificação in-app) é alimentado pelo run log, então grava o
+      // conteúdo SEMPRE — mesmo sem inscrição push (ou com o push falhando), o
+      // usuário ainda vê o aviso ao abrir o app. Push é best-effort por cima disso.
+      const recs = pushRecsFor(rec, subscriptions);
+      if (recs.length === 0) {
+        console.warn('[workflow] notify: sem inscrição push p/ uid', rec.uid);
+      } else {
+        // Fan-out para todos os dispositivos do usuário (o digest já faz assim).
+        for (const r of recs) await sendPush(r, payload);
+      }
+      return { title: payload.title, body: payload.body, issueId: ctx.issue?.id };
     }
     case 'k86.screen':
       keyboard.notify({ type: 'summary', title: cfg.title || '', subtitle: cfg.subtitle || '' });

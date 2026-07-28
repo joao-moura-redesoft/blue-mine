@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Download, RefreshCw, X, Loader2 } from 'lucide-react';
 import { redmineApi, type UpdateStatus } from '../api/redmine';
+import { ConfirmDialog } from './workflow/ConfirmDialog';
 
 // Intervalo do check periódico (o app fica aberto por dias). 6h por padrão.
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -17,6 +18,7 @@ export function UpdateBanner() {
   const [error, setError] = useState('');
   // Versão que o usuário dispensou; se chegar uma diferente, o banner volta.
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
+  const [confirmApply, setConfirmApply] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -57,7 +59,6 @@ export function UpdateBanner() {
   };
 
   const apply = async () => {
-    if (!confirm('O app será fechado e reaberto na nova versão. Continuar?')) return;
     setPhase('applying');
     try {
       await redmineApi.applyUpdate();
@@ -95,7 +96,7 @@ export function UpdateBanner() {
       <div className="mt-2 flex justify-end gap-2">
         {phase === 'ready' || phase === 'applying' ? (
           <button
-            onClick={apply}
+            onClick={() => setConfirmApply(true)}
             disabled={phase === 'applying'}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-50 rounded-lg"
           >
@@ -121,6 +122,16 @@ export function UpdateBanner() {
           </button>
         )}
       </div>
+
+      {confirmApply && (
+        <ConfirmDialog
+          title="Reiniciar para aplicar a atualização?"
+          message="O app fecha e reabre sozinho na nova versão em alguns segundos."
+          confirmLabel="Reiniciar agora"
+          onConfirm={apply}
+          onClose={() => setConfirmApply(false)}
+        />
+      )}
     </div>
   );
 }

@@ -38,6 +38,18 @@ export function useNewToday(issues: Issue[] | undefined) {
       }
     });
 
+    // Poda: remove marcadores de tarefas que saíram da lista atribuída e não foram
+    // vistas hoje — senão o rk_seen_issues cresce sem limite. Mantém as atuais (para
+    // não re-sinalizar) e as de hoje. Uma tarefa que sair e voltar pode reaparecer
+    // como "nova" (falso positivo raro e inofensivo).
+    const currentIds = new Set(issues.map((i) => String(i.id)));
+    for (const key of Object.keys(store)) {
+      if (!currentIds.has(key) && store[key] !== today) {
+        delete store[key];
+        changed = true;
+      }
+    }
+
     if (changed) localStorage.setItem(KEY, JSON.stringify(store));
 
     setNewToday(issues.filter((i) => store[String(i.id)] === today));

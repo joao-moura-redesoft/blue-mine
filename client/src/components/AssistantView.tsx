@@ -5,6 +5,7 @@ import DOMPurify from 'dompurify';
 import { redmineApi, type PendingAiAction } from '../api/redmine';
 import { getAIKey } from '../utils/aiConfig';
 import { aiErrorMessage } from '../utils/aiError';
+import { ConfirmDialog } from './workflow/ConfirmDialog';
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -91,6 +92,7 @@ export function AssistantView({ onIssueClick }: { onIssueClick?: (id: number) =>
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [actingId, setActingId] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const hasKey = !!getAIKey();
 
@@ -180,7 +182,7 @@ export function AssistantView({ onIssueClick }: { onIssueClick?: (id: number) =>
         </div>
         {messages.length > 0 && (
           <button
-            onClick={() => setMessages([])}
+            onClick={() => setConfirmClear(true)}
             title="Limpar conversa"
             className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
           >
@@ -188,6 +190,17 @@ export function AssistantView({ onIssueClick }: { onIssueClick?: (id: number) =>
           </button>
         )}
       </div>
+
+      {confirmClear && (
+        <ConfirmDialog
+          title="Limpar esta conversa?"
+          message="O histórico do assistente desaparece — não é possível desfazer."
+          confirmLabel="Limpar"
+          danger
+          onConfirm={() => setMessages([])}
+          onClose={() => setConfirmClear(false)}
+        />
+      )}
 
       {/* Mensagens */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-4">

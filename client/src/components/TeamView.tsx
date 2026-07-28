@@ -96,8 +96,10 @@ export function TeamView({ onIssueClick }: Props) {
     <div className="max-w-5xl mx-auto">
       <div className="mb-4 flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold text-slate-800">Quadro do time</h2>
-          <p className="text-sm text-slate-500 mt-0.5">
+          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+            Quadro do time
+          </h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
             Quem está com o quê — tarefas abertas por pessoa e equipe.
           </p>
         </div>
@@ -105,7 +107,7 @@ export function TeamView({ onIssueClick }: Props) {
           <select
             value={projectId ?? ''}
             onChange={(e) => setProjectId(e.target.value ? Number(e.target.value) : undefined)}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 max-w-64"
+            className="text-sm border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-400 max-w-64"
           >
             <option value="">Todos os projetos</option>
             {(projects ?? []).map((p) => (
@@ -116,7 +118,7 @@ export function TeamView({ onIssueClick }: Props) {
           </select>
           <button
             onClick={() => refetch()}
-            className="p-2 rounded-lg text-slate-500 hover:bg-slate-100"
+            className="p-2 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
             title="Atualizar"
           >
             <RefreshCw size={15} className={isFetching ? 'animate-spin' : ''} />
@@ -125,7 +127,7 @@ export function TeamView({ onIssueClick }: Props) {
       </div>
 
       {!isLoading && overloaded.length > 0 && (
-        <div className="mb-3 flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
+        <div className="mb-3 flex items-center gap-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
           <AlertTriangle size={14} className="flex-shrink-0" />
           <span>
             <strong>{overloaded.length}</strong> {overloaded.length === 1 ? 'pessoa' : 'pessoas'}{' '}
@@ -152,7 +154,7 @@ export function TeamView({ onIssueClick }: Props) {
             <div key={team}>
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
                 {team}{' '}
-                <span className="text-slate-300">
+                <span className="text-slate-300 dark:text-slate-600">
                   · {people.reduce((n, p) => n + p.items.length, 0)}
                 </span>
               </p>
@@ -162,11 +164,11 @@ export function TeamView({ onIssueClick }: Props) {
                   return (
                     <div
                       key={p.id}
-                      className="bg-white rounded-xl border border-slate-200 overflow-hidden"
+                      className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden"
                     >
                       <button
                         onClick={() => toggle(p.id)}
-                        className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-slate-50 transition-colors"
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors"
                       >
                         <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
                           {p.id === 0 ? (
@@ -180,7 +182,7 @@ export function TeamView({ onIssueClick }: Props) {
                               .toUpperCase()
                           )}
                         </div>
-                        <span className="text-sm font-medium text-slate-700 truncate flex-1 text-left">
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate flex-1 text-left">
                           {p.name}
                         </span>
                         {(() => {
@@ -190,7 +192,7 @@ export function TeamView({ onIssueClick }: Props) {
                           return (
                             <span
                               title={`${wip} em andamento`}
-                              className={`text-[10px] font-semibold rounded-full px-1.5 py-0.5 flex items-center gap-0.5 flex-shrink-0 ${over ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-700'}`}
+                              className={`text-[10px] font-semibold rounded-full px-1.5 py-0.5 flex items-center gap-0.5 flex-shrink-0 ${over ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-300' : 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'}`}
                             >
                               <Play size={9} className="fill-current" />
                               {wip}
@@ -198,7 +200,7 @@ export function TeamView({ onIssueClick }: Props) {
                           );
                         })()}
                         <span
-                          className="text-xs font-semibold text-slate-500 bg-slate-100 rounded-full px-2 py-0.5 flex-shrink-0"
+                          className="text-xs font-semibold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 rounded-full px-2 py-0.5 flex-shrink-0"
                           title="Total de tarefas abertas"
                         >
                           {p.items.length}
@@ -210,20 +212,20 @@ export function TeamView({ onIssueClick }: Props) {
                         )}
                       </button>
                       {open && (
-                        <div className="border-t border-slate-100 divide-y divide-slate-50">
+                        <div className="border-t border-slate-100 dark:border-slate-800 divide-y divide-slate-50 dark:divide-slate-800">
                           {p.items.map((issue) => (
                             <button
                               key={issue.id}
                               onClick={() => onIssueClick(issue.id)}
-                              className="w-full text-left flex items-center gap-2 px-3 py-1.5 hover:bg-blue-50 transition-colors group"
+                              className="w-full text-left flex items-center gap-2 px-3 py-1.5 hover:bg-blue-50 dark:hover:bg-slate-800 transition-colors group"
                             >
                               <span className="text-[11px] font-medium text-slate-400 flex-shrink-0">
                                 #{issue.id}
                               </span>
-                              <span className="text-xs text-slate-600 group-hover:text-blue-700 truncate flex-1">
+                              <span className="text-xs text-slate-600 dark:text-slate-300 group-hover:text-blue-700 dark:group-hover:text-blue-400 truncate flex-1">
                                 {issue.subject}
                               </span>
-                              <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded flex-shrink-0">
+                              <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded flex-shrink-0">
                                 {issue.status.name}
                               </span>
                             </button>

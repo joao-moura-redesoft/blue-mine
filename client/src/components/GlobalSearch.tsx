@@ -45,7 +45,10 @@ export function GlobalSearch({ onSelectIssue }: Props) {
 
   return (
     <div ref={ref} className="relative flex-1 max-w-md">
-      <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+      <Search
+        size={15}
+        className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
+      />
       <input
         ref={inputRef}
         value={query}
@@ -55,7 +58,7 @@ export function GlobalSearch({ onSelectIssue }: Props) {
         }}
         onFocus={() => setOpen(true)}
         placeholder="Buscar qualquer tarefa por #ID ou título..."
-        className="w-full pl-9 pr-8 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-slate-50 focus:bg-white transition-colors"
+        className="w-full pl-9 pr-8 py-1.5 text-sm border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-slate-50 dark:bg-slate-900/40 focus:bg-white dark:focus:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-colors"
         onKeyDown={(e) => {
           if (e.key === 'Escape') {
             setOpen(false);
@@ -70,20 +73,20 @@ export function GlobalSearch({ onSelectIssue }: Props) {
             setQuery('');
             setOpen(false);
           }}
-          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
         >
           <X size={14} />
         </button>
       )}
 
       {open && debounced.length >= 2 && (
-        <div className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 overflow-hidden">
+        <div className="absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
           {isFetching ? (
-            <div className="flex items-center justify-center gap-2 py-6 text-slate-400 text-sm">
+            <div className="flex items-center justify-center gap-2 py-6 text-slate-400 dark:text-slate-500 text-sm">
               <Loader2 size={15} className="animate-spin" /> Buscando…
             </div>
           ) : !results || results.length === 0 ? (
-            <div className="py-6 text-center text-sm text-slate-400">
+            <div className="py-6 text-center text-sm text-slate-400 dark:text-slate-500">
               Nenhuma tarefa encontrada.
             </div>
           ) : (
@@ -92,20 +95,22 @@ export function GlobalSearch({ onSelectIssue }: Props) {
                 <button
                   key={issue.id}
                   onClick={() => select(issue.id)}
-                  className="w-full text-left px-4 py-2 hover:bg-blue-50 transition-colors border-b border-slate-50 last:border-0"
+                  className="w-full text-left px-4 py-2 hover:bg-blue-50 dark:hover:bg-slate-800 transition-colors border-b border-slate-50 dark:border-slate-800 last:border-0"
                 >
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-slate-400 flex-shrink-0">
+                    <span className="text-xs font-medium text-slate-400 dark:text-slate-500 flex-shrink-0">
                       #{issue.id}
                     </span>
-                    <span className="text-sm text-slate-800 font-medium truncate flex-1">
+                    <span className="text-sm text-slate-800 dark:text-slate-100 font-medium truncate flex-1">
                       {issue.subject}
                     </span>
-                    <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded flex-shrink-0">
+                    <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded flex-shrink-0">
                       {issue.status.name}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-400 mt-0.5 truncate">{issue.project.name}</p>
+                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5 truncate">
+                    {issue.project.name}
+                  </p>
                 </button>
               ))}
             </div>

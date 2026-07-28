@@ -176,6 +176,7 @@ server/workflows.json
 server/workflow-state.json
 server/workflow-runs.json
 server/digest-*.json
+server/talk-match-cache.json
 
 # Saída de execução do servidor (stdout/stderr) — gerada em runtime
 srv.out

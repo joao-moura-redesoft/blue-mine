@@ -11,7 +11,11 @@ const { createJsonStore } = require('../lib/jsonStore');
 // Não é segredo (só contadores), mas mora junto dos demais dados por-usuário.
 const store = createJsonStore('ai-usage.json', { fallback: {}, encrypted: false });
 
-const today = () => new Date().toISOString().slice(0, 10);
+// Data LOCAL (não UTC) para o bucket "por dia" virar à meia-noite do usuário,
+// não às 21h (BRT). Consistente com o resto do app (ver useNewToday no client).
+const pad = (n) => String(n).padStart(2, '0');
+const ymdLocal = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const today = () => ymdLocal(new Date());
 
 function blank() {
   return { calls: 0, inputTokens: 0, outputTokens: 0 };
@@ -33,7 +37,7 @@ function record(uid, provider, usage = {}) {
   const d = today();
   add((u.daily[d] ||= blank()), inTok, outTok);
   // Poda diários com mais de 90 dias para o arquivo não crescer sem limite.
-  const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const cutoff = ymdLocal(new Date(Date.now() - 90 * 24 * 60 * 60 * 1000));
   for (const day of Object.keys(u.daily)) if (day < cutoff) delete u.daily[day];
   try {
     store.save();

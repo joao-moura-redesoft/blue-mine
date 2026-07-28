@@ -12,9 +12,18 @@ function isPrivateIp(ip) {
   if (!ip) return true;
   let addr = ip.toLowerCase();
 
-  // IPv4 mapeado em IPv6
+  // IPv4 mapeado em IPv6 (forma decimal: ::ffff:1.2.3.4)
   const mapped = addr.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
   if (mapped) addr = mapped[1];
+
+  // IPv4 mapeado em IPv6 (forma HEX: ::ffff:7f00:1 = 127.0.0.1). Sem tratar isso,
+  // um loopback/interno em hex passava como "público" e furava o guard.
+  const mappedHex = addr.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (mappedHex) {
+    const hi = parseInt(mappedHex[1], 16);
+    const lo = parseInt(mappedHex[2], 16);
+    addr = `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+  }
 
   if (addr.includes('.')) {
     const p = addr.split('.').map(Number);

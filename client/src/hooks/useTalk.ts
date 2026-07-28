@@ -7,14 +7,17 @@ import {
   getTalkAuth,
   editMessage,
   deleteMessage,
+  deleteMessageAttachment,
   addReaction,
   removeReaction,
   createRoom,
   searchNCUsers,
   fetchUserStatuses,
+  fetchRedmineTalkMatch,
 } from '../api/talk';
-import type { TalkMessage, UserStatus } from '../api/talk';
+import type { TalkMessage, TalkRoom, UserStatus, RedmineTalkMatch } from '../api/talk';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { talkRead } from '../utils/talkRead';
 
 function talkEnabled() {
   return !!getTalkAuth();
@@ -40,6 +43,18 @@ export function useTalkRooms() {
     // sem notificação de Talk até voltar o foco.
     refetchIntervalInBackground: true,
     staleTime: 10_000,
+    // Suprime o "não lido" que o servidor ainda reporta mas o usuário JÁ leu neste
+    // dispositivo (recálculo eventual do NC / POST /read não propagado). Só zera —
+    // nunca aumenta — então mensagens NOVAS (id > readId) continuam aparecendo.
+    // Roda a cada mudança do cache (inclui o poll de fundo), então um poll com contagem
+    // antiga é neutralizado na hora, sem "piscar de volta".
+    select: (rooms: TalkRoom[]) =>
+      rooms.map((r) => {
+        const lastId = r.lastMessage?.id ?? 0;
+        return r.unreadMessages > 0 && lastId > 0 && talkRead.get(r.token) >= lastId
+          ? { ...r, unreadMessages: 0, unreadMention: false }
+          : r;
+      }),
   });
 }
 
@@ -49,22 +64,48 @@ export function useTalkMessages(token: string | null) {
     queryKey: ['talk-messages', token],
     queryFn: async () => {
       const fresh = await fetchMessages(token!);
-      // Preserva bolhas otimistas (enviando/falhou) ainda ausentes no servidor. Sem isto,
-      // um refetch de fundo (intervalo de 30s, foco da aba, staleTime) substituiria o cache
-      // pela lista do servidor e apagaria a mensagem em TRÂNSITO de uma conexão lenta — o
-      // usuário via a bolha "sumir" mesmo com o POST a caminho (que no fim entrega). Também
-      // mantém a bolha "falhou" viva para o botão de reenviar não desaparecer.
+      // Um refetch de fundo (intervalo de 30s, foco da aba, staleTime) NÃO pode simplesmente
+      // substituir o cache pela lista do servidor: isso apagaria (a) mensagens em TRÂNSITO
+      // e (b) mensagens já ENTREGUES que o Nextcloud ainda não indexou (read-after-write).
+      // Merge abaixo protege as duas classes antes de aceitar `fresh`.
       const prev = qc.getQueryData<TalkMessage[]>(['talk-messages', token]) ?? [];
+
+      // 1) Bolhas otimistas (enviando/falhou) ainda ausentes no servidor.
+      //    A mensagem real já chegou? (mesmo autor + texto) → descarta a bolha otimista.
+      //    Bônus: se o servidor recebeu mas a resposta falhou (timeout), a bolha "falhou"
+      //    some sozinha no próximo refetch, pois a mensagem real aparece em `fresh`.
+      //    Casamos por CONTAGEM (multiset), não por presença: enviar o mesmo texto 2x
+      //    seguidas gera 2 bolhas com a MESMA chave; um único real correspondente deve
+      //    descartar só UMA delas, não as duas (senão a 2ª some até o próximo refetch).
       const pending = prev.filter((m) => m._status === 'sending' || m._status === 'failed');
-      if (pending.length === 0) return fresh;
-      // A mensagem real já chegou? (mesmo autor + texto) → descarta a bolha otimista.
-      // Bônus: se o servidor recebeu mas a resposta falhou (timeout), a bolha "falhou"
-      // some sozinha no próximo refetch, pois a mensagem real aparece em `fresh`.
-      const freshKeys = new Set(fresh.map((m) => `${m.actorId} ${m.message}`));
-      const keep = pending.filter(
-        (p) => !freshKeys.has(`${p.actorId} ${p._clientText ?? p.message}`),
-      );
-      return [...keep, ...fresh];
+      const freshCounts = new Map<string, number>();
+      for (const m of fresh) {
+        const k = `${m.actorId} ${m.message}`;
+        freshCounts.set(k, (freshCounts.get(k) ?? 0) + 1);
+      }
+      const keepPending = pending.filter((p) => {
+        const k = `${p.actorId} ${p._clientText ?? p.message}`;
+        const n = freshCounts.get(k) ?? 0;
+        if (n > 0) {
+          freshCounts.set(k, n - 1); // consome uma correspondência real
+          return false; // o real chegou → descarta esta bolha otimista
+        }
+        return true; // ainda não veio → mantém
+      });
+
+      // 2) Read-after-write do Nextcloud: LOGO após enviar (POST já resolvido, bolha real
+      //    no cache SEM _status), o GET às vezes volta SEM a mensagem recém-postada. Antes,
+      //    como não havia mais nenhuma bolha "pending", o refetch devolvia `fresh` cru e a
+      //    mensagem JÁ ENTREGUE "piscava e sumia" alguns segundos depois. Preservamos toda
+      //    mensagem real do cache mais NOVA que a mais nova do servidor: só pode ser uma
+      //    entrega ainda não indexada — nunca uma exclusão (exclusões são de ids antigos).
+      //    Se `fresh` vier vazio (erro transitório), mantém a conversa inteira em vez de zerar.
+      const maxFreshId = fresh.reduce((max, m) => (m.id > max ? m.id : max), 0);
+      const freshIds = new Set(fresh.map((m) => m.id));
+      const keepNewer = prev.filter((m) => !m._status && m.id > maxFreshId && !freshIds.has(m.id));
+
+      if (keepPending.length === 0 && keepNewer.length === 0) return fresh;
+      return [...keepPending, ...keepNewer, ...fresh];
     },
     enabled: !!token && talkEnabled(),
     refetchInterval: 30_000, // SSE handles real-time; this is just a sync fallback
@@ -185,6 +226,21 @@ export function useDeleteMessage(token: string | null) {
   });
 }
 
+export function useDeleteMessageAttachment(token: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ messageId, path }: { messageId: number; path: string }) =>
+      deleteMessageAttachment(token!, messageId, path),
+    // O Talk não reescreve o conteúdo da mensagem quando o arquivo por trás é apagado, então
+    // marcamos localmente (_attachmentRemoved) para a bolha parar de mostrar a prévia na hora.
+    onSuccess: (_data, { messageId }) => {
+      qc.setQueryData<TalkMessage[]>(['talk-messages', token], (old = []) =>
+        old.map((m) => (m.id === messageId ? { ...m, _attachmentRemoved: true } : m)),
+      );
+    },
+  });
+}
+
 export function useReaction(token: string | null) {
   const qc = useQueryClient();
   return useMutation({
@@ -232,6 +288,24 @@ export function useUserStatuses() {
     refetchInterval: 60_000,
     staleTime: 30_000,
   });
+}
+
+// Mapa redmineId → usuário do Talk correspondente (por nome). O servidor já cacheia
+// por 24h (a fonte é pesada — catálogo de contatos do Nextcloud), então aqui basta
+// não reconsultar a cada montagem de componente.
+export function useTalkRedmineMatch() {
+  return useQuery({
+    queryKey: ['talk-redmine-match'],
+    queryFn: fetchRedmineTalkMatch,
+    enabled: talkEnabled(),
+    staleTime: 60 * 60 * 1000,
+  });
+}
+
+export function useTalkMatchFor(redmineId?: number): RedmineTalkMatch | undefined {
+  const { data } = useTalkRedmineMatch();
+  if (!redmineId || !data) return undefined;
+  return data.byRedmineId[String(redmineId)];
 }
 
 export function useSearchNCUsers(query: string) {
@@ -336,12 +410,24 @@ export function useTalkSSE(token: string | null, initialMessageId: number) {
           // Quando a mensagem real chega via SSE antes do onSuccess do envio, remove a
           // bolha otimista correspondente (mesmo autor/texto ainda "enviando") para não
           // exibir duas bolhas idênticas por alguns milissegundos.
-          const addedKeys = new Set(toAdd.map((m) => `${m.actorId} ${m.message}`));
-          const base = old.some((m) => m._status === 'sending')
-            ? old.filter(
-                (m) => m._status !== 'sending' || !addedKeys.has(`${m.actorId} ${m.message}`),
-              )
-            : old;
+          // Casamento por CONTAGEM (multiset): 2 bolhas "ok" iguais + 1 real "ok" no
+          // lote do SSE descarta so UMA bolha, nao as duas. (Tambem remove um byte NULO
+          // que havia no separador da chave — era um \0 em vez de espaco.)
+          const addedCounts = new Map<string, number>();
+          for (const m of toAdd) {
+            const k = `${m.actorId} ${m.message}`;
+            addedCounts.set(k, (addedCounts.get(k) ?? 0) + 1);
+          }
+          const base = old.filter((m) => {
+            if (m._status !== 'sending') return true;
+            const k = `${m.actorId} ${m.message}`;
+            const n = addedCounts.get(k) ?? 0;
+            if (n > 0) {
+              addedCounts.set(k, n - 1);
+              return false;
+            }
+            return true;
+          });
           return [...toAdd, ...base];
         });
         // invalidateQueries fora do updater para evitar efeito colateral em função pura

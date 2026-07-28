@@ -137,8 +137,17 @@ function fieldValue(field, ctx, now = Date.now()) {
 const ME_FIELDS = new Set(['assignee', 'event.new_assignee']);
 
 function evalRule(rule, ctx, uid, now = Date.now()) {
-  const actual = fieldValue(rule.field, ctx, now);
-  if (actual === undefined || actual === null) return false; // campo indisponível
+  const raw = fieldValue(rule.field, ctx, now);
+  // Distinção importante:
+  //  • `undefined` = o campo NÃO existe naquele contexto (ex.: message.text num
+  //    evento de issue) → indecidível, a regra falha.
+  //  • `null` = o campo existe e está EXPLICITAMENTE vazio (ex.: tarefa sem
+  //    responsável). Isso É um valor comparável: normalizamos para '' para que
+  //    "diferente de X" case corretamente (vazio ≠ X) e para permitir a regra
+  //    "está vazio" (igual a ''). Antes, null caía no early-return e o `neq`
+  //    nunca casava para não-atribuídas.
+  if (raw === undefined) return false;
+  const actual = raw === null ? '' : raw;
   // "Eu (mim)" resolve para o id do usuário dono da automação.
   const value = ME_FIELDS.has(rule.field) && rule.value === 'me' ? uid : rule.value;
   switch (rule.operand) {

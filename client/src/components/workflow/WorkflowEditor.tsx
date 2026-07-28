@@ -54,9 +54,14 @@ import {
   activationBlockers,
   type NodeDescriptor,
 } from './nodeCatalog';
-import { useUpdateWorkflow, useWorkflowRuns } from '../../hooks/useWorkflows';
+import {
+  useUpdateWorkflow,
+  useWorkflowRuns,
+  refreshWorkflowNotifications,
+} from '../../hooks/useWorkflows';
 import { runWorkflow, previewWorkflow, type PreviewResult } from '../../api/workflows';
 import type { Workflow, WorkflowNode } from '../../api/workflows';
+import { useQueryClient } from '@tanstack/react-query';
 
 type WfNode = Node<WfNodeData, 'wf'>;
 
@@ -107,6 +112,7 @@ export function WorkflowEditor(props: { workflow: Workflow; onBack: () => void }
 
 function EditorInner({ workflow, onBack }: { workflow: Workflow; onBack: () => void }) {
   const update = useUpdateWorkflow();
+  const qc = useQueryClient();
   const { screenToFlowPosition, fitView } = useReactFlow();
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -118,6 +124,7 @@ function EditorInner({ workflow, onBack }: { workflow: Workflow; onBack: () => v
   const [tab, setTab] = useState<'config' | 'runs'>('config');
   const [showLastRun, setShowLastRun] = useState(false);
   const [confirmRisky, setConfirmRisky] = useState(false);
+  const [confirmDeleteNode, setConfirmDeleteNode] = useState(false);
   const [query, setQuery] = useState('');
   const [flash, setFlash] = useState<{ ok: boolean; msg: string } | null>(null);
   const [preview, setPreview] = useState<{
@@ -295,6 +302,9 @@ function EditorInner({ workflow, onBack }: { workflow: Workflow; onBack: () => v
     try {
       await save();
       await runWorkflow(workflow.id);
+      // O sino faz polling a cada 20s — um teste manual é uma ação direta do
+      // usuário, então reflete na hora em vez de esperar o próximo ciclo.
+      await refreshWorkflowNotifications(qc);
       showFlash(true, 'Teste disparado — veja o Histórico');
       setTab('runs');
     } catch (e) {
@@ -657,7 +667,7 @@ function EditorInner({ workflow, onBack }: { workflow: Workflow; onBack: () => v
                     Configurar nó
                   </span>
                   <button
-                    onClick={deleteSelected}
+                    onClick={() => setConfirmDeleteNode(true)}
                     className="p-1 text-slate-400 hover:text-red-500"
                     title="Excluir nó (Del)"
                   >
@@ -710,6 +720,17 @@ function EditorInner({ workflow, onBack }: { workflow: Workflow; onBack: () => v
             markDirty();
           }}
           onClose={() => setConfirmRisky(false)}
+        />
+      )}
+
+      {confirmDeleteNode && (
+        <ConfirmDialog
+          danger
+          title="Excluir este nó?"
+          message="A configuração do nó e suas conexões com outros nós são perdidas — não há desfazer."
+          confirmLabel="Excluir"
+          onConfirm={deleteSelected}
+          onClose={() => setConfirmDeleteNode(false)}
         />
       )}
     </div>

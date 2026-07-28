@@ -5,6 +5,7 @@ const axios = require('axios');
 const router = express.Router();
 const handle = require('../lib/handle');
 const { makeTalk } = require('../services/talk');
+const { getMatches: getTalkMatches } = require('../services/talkMatch');
 const { getMyUserId } = require('../lib/redmine');
 const { saveTalkAuth, clearTalkAuth, getTalkAuth } = require('../services/talkStore');
 const { safeAgents } = require('../lib/ssrfGuard');
@@ -553,6 +554,26 @@ router.delete(
   }),
 );
 
+// Remove o arquivo compartilhado por trás de uma mensagem de anexo/imagem. Necessário porque
+// o Talk marca essas mensagens como systemMessage (ex.: "file_shared") e recusa DELETE em
+// /chat/{token}/{messageId} com 405 — a forma que sobra de "apagar a imagem" é excluir o
+// arquivo real no WebDAV, o que quebra a prévia/compartilhamento em todos os clientes.
+router.delete(
+  '/talk/rooms/:token/messages/:messageId/attachment',
+  handle(async (req, res) => {
+    const filePath = req.query.path;
+    if (typeof filePath !== 'string' || !filePath.startsWith('/') || filePath.includes('..')) {
+      throw new AppError(400, 'path inválido');
+    }
+    const encodedPath = filePath
+      .split('/')
+      .map((seg) => encodeURIComponent(seg))
+      .join('/');
+    await (await makeTalk(req)).delete(`/remote.php/webdav${encodedPath}`);
+    res.json({ success: true });
+  }),
+);
+
 // Avatar de sala (grupos)
 router.get(
   '/talk/rooms/:token/avatar',
@@ -946,6 +967,16 @@ router.get(
     req.on('close', () => {
       active = false;
     });
+  }),
+);
+
+// Assimilação Redmine → Talk por nome (ver services/talkMatch.js). Cache em disco
+// (24h) porque a fonte é o catálogo de contatos do Nextcloud, caro de buscar.
+router.get(
+  '/talk/redmine-match',
+  handle(async (req, res) => {
+    const data = await getTalkMatches(req, { forceRefresh: req.query.refresh === '1' });
+    res.json(data);
   }),
 );
 

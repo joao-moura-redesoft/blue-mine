@@ -133,7 +133,7 @@ export function CommandPalette({
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-xl shadow-2xl w-full max-w-xl overflow-hidden border border-slate-200"
+        className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl w-full max-w-xl overflow-hidden border border-slate-200 dark:border-slate-700"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           if (e.key === 'Escape') {
@@ -155,17 +155,19 @@ export function CommandPalette({
           }
         }}
       >
-        <div className="flex items-center gap-2 px-4 border-b border-slate-100">
-          <Search size={16} className="text-slate-400 flex-shrink-0" />
+        <div className="flex items-center gap-2 px-4 border-b border-slate-100 dark:border-slate-700">
+          <Search size={16} className="text-slate-400 dark:text-slate-500 flex-shrink-0" />
           <input
             ref={inputRef}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Buscar tarefa por #ID/título ou ir para uma aba…"
-            className="flex-1 py-3 text-sm focus:outline-none bg-transparent"
+            className="flex-1 py-3 text-sm focus:outline-none bg-transparent text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500"
           />
-          {isFetching && <Loader2 size={14} className="animate-spin text-slate-400" />}
-          <kbd className="text-[10px] text-slate-400 border border-slate-200 rounded px-1.5 py-0.5">
+          {isFetching && (
+            <Loader2 size={14} className="animate-spin text-slate-400 dark:text-slate-500" />
+          )}
+          <kbd className="text-[10px] text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5">
             esc
           </kbd>
         </div>
@@ -186,7 +188,7 @@ export function CommandPalette({
             return (
               <div key={`${item.type}-${item.id}`}>
                 {showHeader && (
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-4 pt-2 pb-1">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-4 pt-2 pb-1">
                     {headerLabel}
                   </p>
                 )}
@@ -194,47 +196,60 @@ export function CommandPalette({
                   ref={active ? activeRef : undefined}
                   onMouseEnter={() => setSel(i)}
                   onClick={() => activate(item)}
-                  className={`w-full text-left flex items-center gap-2.5 px-4 py-2 ${active ? 'bg-blue-50' : ''}`}
+                  className={`w-full text-left flex items-center gap-2.5 px-4 py-2 ${active ? 'bg-blue-50 dark:bg-slate-800' : ''}`}
                 >
-                  <span className={`flex-shrink-0 ${active ? 'text-blue-600' : 'text-slate-400'}`}>
+                  <span
+                    className={`flex-shrink-0 ${active ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400 dark:text-slate-500'}`}
+                  >
                     {isIssue ? <Hash size={14} /> : item.icon}
                   </span>
                   {isIssue && (
-                    <span className="text-xs font-medium text-slate-400 flex-shrink-0">
+                    <span className="text-xs font-medium text-slate-400 dark:text-slate-500 flex-shrink-0">
                       #{item.id}
                     </span>
                   )}
                   <span
-                    className={`text-sm truncate flex-1 ${active ? 'text-blue-700' : 'text-slate-700'}`}
+                    className={`text-sm truncate flex-1 ${active ? 'text-blue-700 dark:text-blue-300' : 'text-slate-700 dark:text-slate-200'}`}
                   >
                     {item.label}
                   </span>
                   {isIssue && (
-                    <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded flex-shrink-0">
+                    <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded flex-shrink-0">
                       {item.status}
                     </span>
                   )}
-                  {active && <CornerDownLeft size={13} className="text-slate-300 flex-shrink-0" />}
+                  {active && (
+                    <CornerDownLeft
+                      size={13}
+                      className="text-slate-300 dark:text-slate-600 flex-shrink-0"
+                    />
+                  )}
                 </button>
               </div>
             );
           })}
 
           {debounced.length >= 2 && !isFetching && (issues?.length ?? 0) === 0 && (
-            <p className="px-4 py-3 text-sm text-slate-400">Nenhuma tarefa encontrada.</p>
+            <p className="px-4 py-3 text-sm text-slate-400 dark:text-slate-500">
+              Nenhuma tarefa encontrada.
+            </p>
           )}
           {items.length === 0 && debounced.length < 2 && (
-            <p className="px-4 py-3 text-sm text-slate-400">Digite para buscar tarefas…</p>
+            <p className="px-4 py-3 text-sm text-slate-400 dark:text-slate-500">
+              Digite para buscar tarefas…
+            </p>
           )}
         </div>
 
-        <div className="flex items-center gap-3 px-4 py-2 border-t border-slate-100 text-[11px] text-slate-400">
+        <div className="flex items-center gap-3 px-4 py-2 border-t border-slate-100 dark:border-slate-700 text-[11px] text-slate-400 dark:text-slate-500">
           <span className="flex items-center gap-1">
-            <kbd className="border border-slate-200 rounded px-1">↑</kbd>
-            <kbd className="border border-slate-200 rounded px-1">↓</kbd> navegar
+            <kbd className="border border-slate-200 dark:border-slate-700 rounded px-1">↑</kbd>
+            <kbd className="border border-slate-200 dark:border-slate-700 rounded px-1">↓</kbd>{' '}
+            navegar
           </span>
           <span className="flex items-center gap-1">
-            <kbd className="border border-slate-200 rounded px-1">↵</kbd> abrir
+            <kbd className="border border-slate-200 dark:border-slate-700 rounded px-1">↵</kbd>{' '}
+            abrir
           </span>
         </div>
       </div>

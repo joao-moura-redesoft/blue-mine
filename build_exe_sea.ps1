@@ -40,16 +40,16 @@ node --experimental-sea-config sea-config.json
 Step 6 "Copiando o binario do Node para bluemine.exe..."
 node -e "require('fs').copyFileSync(process.execPath, 'bluemine.exe')"
 
-Step 7 "Injetando o blob no executavel (postject)..."
-npx --yes postject bluemine.exe NODE_SEA_BLOB build/bluemine.blob --sentinel-fuse $FUSE
-if ($LASTEXITCODE -ne 0) { Write-Host "Falha ao injetar o blob." -ForegroundColor Red; exit 1 }
-
-Step 8 "Gravando o icone no executavel..."
+Step 7 "Gravando o icone no executavel..."
 try { node scripts/set-exe-icon.cjs "bluemine.exe" } catch { Write-Host "Aviso: nao foi possivel gravar o icone." -ForegroundColor DarkYellow }
 
-Step 9 "Marcando o binario como GUI (sem janela de console)..."
+Step 8 "Marcando o binario como GUI (sem janela de console)..."
 node scripts/set-gui-subsystem.cjs "bluemine.exe"
 if ($LASTEXITCODE -ne 0) { Write-Host "Falha ao marcar como GUI." -ForegroundColor Red; exit 1 }
+
+Step 9 "Injetando o blob no executavel (postject)..."
+npx --yes postject bluemine.exe NODE_SEA_BLOB build/bluemine.blob --sentinel-fuse $FUSE
+if ($LASTEXITCODE -ne 0) { Write-Host "Falha ao injetar o blob." -ForegroundColor Red; exit 1 }
 
 Write-Host "`nBuild concluido! bluemine.exe (SEA) gerado na raiz." -ForegroundColor Green
 Write-Host "Dica: assine o binario (signtool) antes de distribuir." -ForegroundColor DarkGray

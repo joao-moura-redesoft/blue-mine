@@ -102,11 +102,21 @@ async function fire(item, subscriptions, sendPush) {
     alwaysShow: true, // lembrete deve aparecer mesmo com o app aberto (sem polling em 1º plano)
   };
   if (recs.length === 0) {
-    // Sem dispositivo inscrito: nada a entregar agora. Não relança para não repetir.
-    console.warn('[scheduler] lembrete sem inscrição de push para uid', item.uid);
-    return;
+    // Sem dispositivo inscrito AINDA. Antes, descartávamos o lembrete no vazio —
+    // com o push demorando a inscrever (app reabrindo, SW instalando), o lembrete
+    // sumia. Agora LANÇA: o tick reagenda (+2min) e dá janela para o device se
+    // inscrever; após 5 tentativas o tick marca 'failed' (não repete para sempre).
+    throw new Error('sem inscrição de push para o usuário');
   }
-  for (const rec of recs) await sendPush(rec, payload);
+  // Só considera o lembrete entregue se PELO MENOS um device recebeu. sendPush engole
+  // erros (não lança) e devolve false em falha (5xx/rede/inscrição morta); se nenhum
+  // recebeu, LANÇA para o tick reagendar (+2min, até 5x) em vez de dar por entregue e
+  // sumir com o lembrete. Um device que já recebeu não é reenviado (evita duplicar).
+  let delivered = 0;
+  for (const rec of recs) {
+    if (await sendPush(rec, payload)) delivered++;
+  }
+  if (delivered === 0) throw new Error('nenhum device recebeu o lembrete (falha de entrega)');
 }
 
 let running = false;

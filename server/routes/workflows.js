@@ -6,7 +6,7 @@ const router = express.Router();
 const { getMyUserId } = require('../lib/redmine');
 const handle = require('../lib/handle');
 const { listWorkflows, upsertWorkflow, deleteWorkflow } = require('../services/workflowStore');
-const { listRuns } = require('../services/workflowRuns');
+const { listRuns, listNotifyEvents } = require('../services/workflowRuns');
 
 const newId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -52,6 +52,23 @@ router.get(
   handle(async (req, res) => {
     const uid = await getMyUserId(req);
     res.json(listWorkflows(uid));
+  }),
+);
+
+// Disparos recentes da ação "Notificar (push)", de todas as automações do
+// usuário — alimenta o sino do app (in-app), independente do Web Push ter uma
+// inscrição ativa ou não.
+router.get(
+  '/workflows/notifications',
+  handle(async (req, res) => {
+    const uid = await getMyUserId(req);
+    const events = listNotifyEvents(uid);
+    const nameById = new Map(listWorkflows(uid).map((w) => [w.id, w.name]));
+    // Alimenta o sino, que precisa do evento mais recente logo após uma ação do
+    // usuário (ex.: "Testar") — sem isso um GET repetido na mesma URL pode ser
+    // servido do cache HTTP do navegador em vez de bater no servidor.
+    res.set('Cache-Control', 'no-store');
+    res.json(events.map((e) => ({ ...e, workflowName: nameById.get(e.workflowId) || 'Automação' })));
   }),
 );
 

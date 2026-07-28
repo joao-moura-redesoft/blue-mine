@@ -32,6 +32,7 @@ import {
   mailApi,
   type MailMessageSummary,
   type MailMessageFull,
+  type MailFolder,
   type UploadedAttachment,
   type ForwardPart,
 } from '../api/mail';
@@ -165,6 +166,41 @@ function MailViewInner() {
   });
 
   const messages = listQuery.data?.messages ?? [];
+
+  // Abre a mensagem e marca como lida NA HORA (otimista). O servidor já marca lido
+  // (GetMsgRequest read=1), mas o Zimbra propaga o flag com atraso — o refetch do
+  // onChanged voltava com "não lido" e o ponto/contador ficavam presos (read-after-write,
+  // mesmo padrão que corrigimos no Talk). Só decrementa contadores se ESTAVA não lida
+  // (idempotente ao reabrir). Em busca, não mexe em contador de pasta (pasta desconhecida).
+  const isInbox = !activeSearch && folder.toLowerCase() === 'inbox';
+  const openMessage = (m: MailMessageSummary) => {
+    setSelectedId(m.id);
+    if (!m.unread) return;
+    qc.setQueriesData<{ messages: MailMessageSummary[]; more: boolean }>(
+      { queryKey: ['mail', 'list'] },
+      (old) =>
+        old
+          ? {
+              ...old,
+              messages: old.messages.map((x) => (x.id === m.id ? { ...x, unread: false } : x)),
+            }
+          : old,
+    );
+    if (!activeSearch) {
+      qc.setQueryData<MailFolder[]>(['mail', 'folders'], (old) =>
+        old?.map((f) =>
+          f.name.toLowerCase() === folder.toLowerCase()
+            ? { ...f, unread: Math.max(0, f.unread - 1) }
+            : f,
+        ),
+      );
+    }
+    if (isInbox) {
+      qc.setQueryData<{ unread: number; inboxTotal: number }>(['mail', 'unread'], (old) =>
+        old ? { ...old, unread: Math.max(0, old.unread - 1) } : old,
+      );
+    }
+  };
 
   const folders = useMemo(() => {
     const list = foldersQuery.data ?? [];
@@ -302,7 +338,7 @@ function MailViewInner() {
                     key={m.id}
                     m={m}
                     selected={selectedId === m.id}
-                    onClick={() => setSelectedId(m.id)}
+                    onClick={() => openMessage(m)}
                   />
                 ))}
                 {listQuery.data?.more && (
@@ -330,9 +366,14 @@ function MailViewInner() {
               onReply={(full, all) => setCompose(buildReply(full, all))}
               onForward={(full) => setCompose(buildForward(full))}
               onChanged={() => {
-                qc.invalidateQueries({ queryKey: ['mail', 'list'] });
-                qc.invalidateQueries({ queryKey: ['mail', 'folders'] });
-                qc.invalidateQueries({ queryKey: ['mail', 'unread'] });
+                // Só a LISTA é reconciliada (com atraso, para o Zimbra propagar o flag da
+                // mensagem). Os CONTADORES (folders/unread) NÃO são invalidados aqui: o
+                // contador de pasta do Zimbra (GetFolderRequest) propaga bem mais devagar
+                // que o flag da mensagem, então refetchá-lo agora traria o número ANTIGO e
+                // desfaria o decremento otimista — era isso que deixava o pontinho certo
+                // mas o badge da barra lateral preso. O decremento local é a verdade até o
+                // refetch natural (unread: 2min; folders: staleTime/foco) confirmar.
+                setTimeout(() => qc.invalidateQueries({ queryKey: ['mail', 'list'] }), 2500);
               }}
               onActed={(closeAfter) => {
                 qc.invalidateQueries({ queryKey: ['mail', 'list'] });

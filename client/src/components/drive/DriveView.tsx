@@ -1307,9 +1307,7 @@ function ItemMenu({
           e.stopPropagation();
           onToggle();
         }}
-        className={`p-1 rounded-lg bg-white/90 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 shadow-sm transition-opacity ${
-          inline ? 'opacity-0 group-hover:opacity-100' : 'opacity-0 group-hover:opacity-100'
-        } ${open ? '!opacity-100' : ''}`}
+        className={`p-1 rounded-lg bg-white/90 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 shadow-sm transition-opacity opacity-40 group-hover:opacity-100 ${open ? '!opacity-100' : ''}`}
       >
         <MoreVertical size={14} />
       </button>

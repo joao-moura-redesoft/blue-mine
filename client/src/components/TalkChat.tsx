@@ -65,6 +65,7 @@ import {
   useTalkCurrentUser,
   useEditMessage,
   useDeleteMessage,
+  useDeleteMessageAttachment,
   useReaction,
   useCreateRoom,
   useSearchNCUsers,
@@ -108,6 +109,7 @@ import type { UserStatusType } from '../api/talk';
 import { getStoredAuth, authHeaders, redmineApi } from '../api/redmine';
 import { talkBridge } from '../utils/talkBridge';
 import { talkMute } from '../utils/talkMute';
+import { talkRead } from '../utils/talkRead';
 import { talkPins } from '../utils/talkPins';
 import { talkSaved } from '../utils/talkSaved';
 import type { TalkRoom, TalkMessage, TalkParticipant, TalkMessageParam } from '../api/talk';
@@ -137,7 +139,7 @@ function linkify(text: string, isMe: boolean): React.ReactNode[] {
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
-            className={`underline break-all ${isMe ? 'text-white' : 'text-blue-600'}`}
+            className={`underline break-all ${isMe ? 'text-white' : 'text-blue-600 dark:text-blue-400'}`}
           >
             {trimmed}
           </a>
@@ -159,7 +161,7 @@ function renderMarkdown(text: string, isMe: boolean): React.ReactNode[] {
       return (
         <code
           key={i}
-          className={`rounded px-1 font-mono text-[10px] ${isMe ? 'bg-white/20' : 'bg-slate-200'}`}
+          className={`rounded px-1 font-mono text-[10px] ${isMe ? 'bg-white/20' : 'bg-slate-200 dark:bg-slate-700'}`}
         >
           {part.slice(1, -1)}
         </code>
@@ -278,7 +280,7 @@ function RedmineIssueChip({
       className={`inline-flex items-baseline gap-1 px-2 py-0.5 mx-0.5 rounded-md text-[11px] font-medium transition-colors align-baseline border ${
         isMe
           ? 'bg-white/20 border-white/40 text-white hover:bg-white/30'
-          : 'bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100'
+          : 'bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/40'
       }`}
     >
       {data?.status && (
@@ -291,7 +293,9 @@ function RedmineIssueChip({
       <span className="font-mono font-bold flex-shrink-0">#{id}</span>
       {data?.subject && <span>— {data.subject}</span>}
       {data?.assigned_to && (
-        <span className={`flex-shrink-0 ${isMe ? 'text-white/70' : 'text-blue-500'}`}>
+        <span
+          className={`flex-shrink-0 ${isMe ? 'text-white/70' : 'text-blue-500 dark:text-blue-400'}`}
+        >
           · {data.assigned_to.name.split(' ')[0]}
         </span>
       )}
@@ -421,22 +425,24 @@ function UserProfilePopup({
       onClick={onClose}
     >
       <div
-        className="w-72 bg-white rounded-2xl shadow-2xl overflow-hidden"
+        className="w-72 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="relative flex flex-col items-center pt-6 pb-4 px-5 bg-gradient-to-b from-blue-50 to-white">
+        <div className="relative flex flex-col items-center pt-6 pb-4 px-5 bg-gradient-to-b from-blue-50 to-white dark:from-blue-950/40 dark:to-slate-900">
           <button
             onClick={onClose}
-            className="absolute top-2 right-2 p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+            className="absolute top-2 right-2 p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:text-slate-500 dark:hover:text-slate-300 dark:hover:bg-slate-800"
           >
             <X size={14} />
           </button>
           <TalkAvatar actorId={actorId} displayName={name} size={72} status={userStatus?.status} />
-          <p className="mt-3 text-base font-semibold text-slate-800 text-center">{name}</p>
-          {!isUuid && <p className="text-xs text-slate-400">@{actorId}</p>}
+          <p className="mt-3 text-base font-semibold text-slate-800 dark:text-slate-100 text-center">
+            {name}
+          </p>
+          {!isUuid && <p className="text-xs text-slate-400 dark:text-slate-500">@{actorId}</p>}
           {userStatus &&
             (userStatus.message || (userStatus.status && userStatus.status !== 'offline')) && (
-              <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1">
                 {userStatus.icon && <span>{userStatus.icon}</span>}
                 {userStatus.message || STATUS_LABEL[userStatus.status]}
               </p>
@@ -444,27 +450,32 @@ function UserProfilePopup({
         </div>
 
         <div className="px-5 pb-4 space-y-1.5">
-          {isLoading && <p className="text-xs text-slate-400 text-center py-2">Carregando…</p>}
+          {isLoading && (
+            <p className="text-xs text-slate-400 dark:text-slate-500 text-center py-2">
+              Carregando…
+            </p>
+          )}
           {!isLoading && profile?.role && (
-            <p className="text-xs text-slate-600">
-              <span className="text-slate-400">Cargo:</span> {profile.role}
+            <p className="text-xs text-slate-600 dark:text-slate-300">
+              <span className="text-slate-400 dark:text-slate-500">Cargo:</span> {profile.role}
             </p>
           )}
           {!isLoading && profile?.organisation && (
-            <p className="text-xs text-slate-600">
-              <span className="text-slate-400">Equipe:</span> {profile.organisation}
+            <p className="text-xs text-slate-600 dark:text-slate-300">
+              <span className="text-slate-400 dark:text-slate-500">Equipe:</span>{' '}
+              {profile.organisation}
             </p>
           )}
           {!isLoading && profile?.email && (
             <a
               href={`mailto:${profile.email}`}
-              className="block text-xs text-blue-600 hover:underline break-all"
+              className="block text-xs text-blue-600 dark:text-blue-400 hover:underline break-all"
             >
               {profile.email}
             </a>
           )}
           {!isLoading && profile?.phone && (
-            <p className="text-xs text-slate-600">{profile.phone}</p>
+            <p className="text-xs text-slate-600 dark:text-slate-300">{profile.phone}</p>
           )}
 
           {!isSelf && (
@@ -603,7 +614,7 @@ function TalkImage({
           <div className="relative max-w-3xl max-h-full" onClick={(e) => e.stopPropagation()}>
             <button
               onClick={() => setLightbox(false)}
-              className="absolute -top-3 -right-3 w-7 h-7 bg-white rounded-full flex items-center justify-center shadow-lg text-slate-700 hover:text-slate-900 z-10"
+              className="absolute -top-3 -right-3 w-7 h-7 bg-white dark:bg-slate-800 rounded-full flex items-center justify-center shadow-lg text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-slate-100 z-10"
             >
               <X size={14} />
             </button>
@@ -805,7 +816,7 @@ function TalkAudio({
       <div className="flex-1 min-w-0 flex flex-col gap-1">
         <div
           onClick={seek}
-          className={`h-1.5 rounded-full cursor-pointer ${isMe ? 'bg-white/30' : 'bg-slate-300'}`}
+          className={`h-1.5 rounded-full cursor-pointer ${isMe ? 'bg-white/30' : 'bg-slate-300 dark:bg-slate-600'}`}
         >
           <div
             className={`h-full rounded-full ${isMe ? 'bg-white' : 'bg-blue-500'}`}
@@ -813,7 +824,7 @@ function TalkAudio({
           />
         </div>
         <span
-          className={`text-[9px] tabular-nums leading-none ${isMe ? 'text-white/70' : 'text-slate-400'}`}
+          className={`text-[9px] tabular-nums leading-none ${isMe ? 'text-white/70' : 'text-slate-400 dark:text-slate-400'}`}
         >
           {fmt(cur > 0 || playing ? cur : dur)}
         </span>
@@ -821,7 +832,7 @@ function TalkAudio({
       <button
         onClick={() => downloadTalkFile(file, actorId)}
         title="Baixar áudio"
-        className={`flex-shrink-0 transition-colors ${isMe ? 'text-white/70 hover:text-white' : 'text-slate-400 hover:text-blue-600'}`}
+        className={`flex-shrink-0 transition-colors ${isMe ? 'text-white/70 hover:text-white' : 'text-slate-400 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400'}`}
       >
         <Download size={13} />
       </button>
@@ -854,7 +865,7 @@ function QuotedMessage({
       onClick={() => onJump?.(parent.id)}
       title="Ir para a mensagem"
       className={`talk-quote block text-left text-[10px] rounded-lg px-2 py-1 mb-1 border-l-2 max-w-full truncate transition-colors cursor-pointer ${
-        isMe ? 'border-blue-400' : 'border-slate-400'
+        isMe ? 'border-blue-400' : 'border-slate-400 dark:border-slate-500'
       }`}
     >
       <span className="font-semibold">{parent.actorDisplayName.split(' ')[0]}: </span>
@@ -934,7 +945,7 @@ function FullEmojiPicker({
           }}
         />
       ) : (
-        <div className="w-[240px] h-[120px] flex items-center justify-center bg-white border border-slate-200 rounded-xl">
+        <div className="w-[240px] h-[120px] flex items-center justify-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl">
           <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
         </div>
       )}
@@ -973,7 +984,7 @@ function EmojiPicker({
     // Emojis compactos em linha única — cabem na janela estreita sem quebrar.
     <div
       ref={ref}
-      className={`absolute z-50 bottom-full mb-1 ${align === 'right' ? 'right-0' : 'left-0'} bg-white border border-slate-200 rounded-xl shadow-xl p-1.5 flex gap-1 items-center`}
+      className={`absolute z-50 bottom-full mb-1 ${align === 'right' ? 'right-0' : 'left-0'} bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl p-1.5 flex gap-1 items-center`}
     >
       {QUICK_EMOJIS.map((e) => (
         <button
@@ -982,16 +993,16 @@ function EmojiPicker({
             onPick(e);
             onClose();
           }}
-          className="text-base hover:scale-125 transition-transform leading-none w-6 h-6 flex items-center justify-center rounded hover:bg-slate-100"
+          className="text-base hover:scale-125 transition-transform leading-none w-6 h-6 flex items-center justify-center rounded hover:bg-slate-100 dark:hover:bg-slate-800"
         >
           {e}
         </button>
       ))}
-      <span className="w-px h-4 bg-slate-200 mx-0.5" />
+      <span className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
       <button
         onClick={() => setFull(true)}
         title="Mais emojis"
-        className="w-6 h-6 flex items-center justify-center rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+        className="w-6 h-6 flex items-center justify-center rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:text-slate-500 dark:hover:text-slate-300 dark:hover:bg-slate-800"
       >
         <Plus size={14} />
       </button>
@@ -1023,7 +1034,7 @@ function ReactionBar({
             className={`inline-flex items-center gap-0.5 text-[11px] rounded-full px-1.5 py-0.5 border transition-colors ${
               isMine
                 ? 'bg-blue-100 border-blue-300 text-blue-700 hover:bg-blue-200'
-                : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'
+                : 'bg-slate-100 dark:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
             }`}
           >
             <span>{emoji}</span>
@@ -1068,7 +1079,7 @@ function dividerLabel(prev: TalkMessage | undefined, m: TalkMessage): string | n
 function DateDivider({ label }: { label: string }) {
   return (
     <div className="flex items-center justify-center my-3">
-      <span className="text-[10px] font-medium text-slate-500 bg-slate-100 rounded-full px-2.5 py-0.5">
+      <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 rounded-full px-2.5 py-0.5">
         {label}
       </span>
     </div>
@@ -1138,7 +1149,7 @@ function OGPreview({ url }: { url: string }) {
       href={url}
       target="_blank"
       rel="noopener noreferrer"
-      className="flex gap-2 mt-1.5 p-2 bg-white border border-slate-200 rounded-xl hover:border-blue-300 transition-colors text-left overflow-hidden max-w-full"
+      className="flex gap-2 mt-1.5 p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl hover:border-blue-300 dark:hover:border-blue-600 transition-colors text-left overflow-hidden max-w-full"
     >
       {data.image && (
         <img
@@ -1149,13 +1160,17 @@ function OGPreview({ url }: { url: string }) {
         />
       )}
       <div className="min-w-0 flex-1">
-        <p className="text-xs font-semibold text-slate-800 truncate leading-snug">{data.title}</p>
+        <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate leading-snug">
+          {data.title}
+        </p>
         {data.description && (
-          <p className="text-[10px] text-slate-500 mt-0.5 line-clamp-2 leading-snug">
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2 leading-snug">
             {data.description}
           </p>
         )}
-        <p className="text-[9px] text-slate-400 mt-0.5 truncate">{data.siteName}</p>
+        <p className="text-[9px] text-slate-400 dark:text-slate-400 mt-0.5 truncate">
+          {data.siteName}
+        </p>
       </div>
     </a>
   );
@@ -1166,17 +1181,21 @@ function CallCard({ room, isMe }: { room: string; isMe: boolean }) {
   const { startCall, activeCall, poppedOut } = useJitsi();
   const here = activeCall?.room === room || poppedOut?.room === room;
   return (
-    <div className={`flex items-center gap-2.5 ${isMe ? 'text-white' : 'text-slate-700'}`}>
+    <div
+      className={`flex items-center gap-2.5 ${isMe ? 'text-white' : 'text-slate-700 dark:text-slate-200'}`}
+    >
       <div
         className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-          isMe ? 'bg-white/20' : 'bg-blue-100 text-blue-600'
+          isMe ? 'bg-white/20' : 'bg-blue-100 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400'
         }`}
       >
         <Video size={16} />
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-xs font-semibold leading-tight">Chamada de vídeo</p>
-        <p className={`text-[10px] ${isMe ? 'text-white/70' : 'text-slate-400'}`}>
+        <p
+          className={`text-[10px] ${isMe ? 'text-white/70' : 'text-slate-400 dark:text-slate-400'}`}
+        >
           Toque para entrar
         </p>
       </div>
@@ -1187,7 +1206,7 @@ function CallCard({ room, isMe }: { room: string; isMe: boolean }) {
           here
             ? isMe
               ? 'bg-white/20 text-white/70'
-              : 'bg-slate-100 text-slate-400'
+              : 'bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-400'
             : isMe
               ? 'bg-white text-blue-600 hover:bg-blue-50'
               : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40'
@@ -1263,33 +1282,35 @@ function ForwardDialog({ msgs, onClose }: { msgs: TalkMessage[]; onClose: () => 
       onClick={onClose}
     >
       <div
-        className="w-80 max-h-[70vh] flex flex-col bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden"
+        className="w-80 max-h-[70vh] flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="Encaminhar mensagem"
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-          <span className="text-sm font-semibold text-slate-800">Encaminhar para…</span>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
+          <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+            Encaminhar para…
+          </span>
           <button
             onClick={onClose}
-            className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-600"
+            className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
             aria-label="Fechar"
           >
             <X size={14} />
           </button>
         </div>
-        <div className="px-3 py-2 border-b border-slate-100">
-          <p className="text-[11px] text-slate-500 bg-slate-50 rounded-lg px-2.5 py-1.5 line-clamp-2 mb-2">
+        <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-700">
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 rounded-lg px-2.5 py-1.5 line-clamp-2 mb-2">
             {preview}
           </p>
-          <div className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-1.5">
+          <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800/50 rounded-lg px-3 py-1.5">
             <Search size={13} className="text-slate-400 flex-shrink-0" />
             <input
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Buscar conversa…"
-              className="flex-1 text-xs bg-transparent focus:outline-none placeholder-slate-400"
+              className="flex-1 text-xs bg-transparent focus:outline-none placeholder-slate-400 dark:placeholder-slate-500"
             />
           </div>
         </div>
@@ -1302,10 +1323,10 @@ function ForwardDialog({ msgs, onClose }: { msgs: TalkMessage[]; onClose: () => 
               key={r.token}
               onClick={() => forward(r.token)}
               disabled={!!sending}
-              className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 text-left transition-colors border-b border-slate-50 last:border-0 disabled:opacity-60"
+              className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800 text-left transition-colors border-b border-slate-50 dark:border-slate-800 last:border-0 disabled:opacity-60"
             >
               <RoomAvatar room={r} size={28} />
-              <span className="flex-1 text-xs font-medium text-slate-700 truncate">
+              <span className="flex-1 text-xs font-medium text-slate-700 dark:text-slate-200 truncate">
                 {r.displayName}
               </span>
               {sending === r.token &&
@@ -1393,33 +1414,35 @@ function AttachNoteDialog({
       onClick={onClose}
     >
       <div
-        className="w-80 max-h-[70vh] flex flex-col bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden"
+        className="w-80 max-h-[70vh] flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="Anexar como nota"
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-          <span className="text-sm font-semibold text-slate-800">Adicionar como nota…</span>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
+          <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+            Adicionar como nota…
+          </span>
           <button
             onClick={onClose}
-            className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-600"
+            className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
             aria-label="Fechar"
           >
             <X size={14} />
           </button>
         </div>
-        <div className="px-3 py-2 border-b border-slate-100">
-          <p className="text-[11px] text-slate-500 bg-slate-50 rounded-lg px-2.5 py-1.5 line-clamp-2 mb-2">
+        <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-700">
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 rounded-lg px-2.5 py-1.5 line-clamp-2 mb-2">
             {preview}
           </p>
-          <div className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-1.5">
+          <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800/50 rounded-lg px-3 py-1.5">
             <Search size={13} className="text-slate-400 flex-shrink-0" />
             <input
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Buscar tarefa (nº ou texto)…"
-              className="flex-1 text-xs bg-transparent focus:outline-none placeholder-slate-400"
+              className="flex-1 text-xs bg-transparent focus:outline-none placeholder-slate-400 dark:placeholder-slate-500"
             />
           </div>
           {error && <p className="text-[11px] text-red-500 mt-1.5 px-1">{error}</p>}
@@ -1441,12 +1464,14 @@ function AttachNoteDialog({
               key={r.id}
               onClick={() => attach(r.id)}
               disabled={posting !== null}
-              className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-slate-50 text-left transition-colors border-b border-slate-50 last:border-0 disabled:opacity-60"
+              className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800 text-left transition-colors border-b border-slate-50 dark:border-slate-800 last:border-0 disabled:opacity-60"
             >
-              <span className="font-mono text-[11px] font-bold text-blue-600 flex-shrink-0">
+              <span className="font-mono text-[11px] font-bold text-blue-600 dark:text-blue-400 flex-shrink-0">
                 #{r.id}
               </span>
-              <span className="flex-1 text-xs text-slate-700 truncate">{r.subject}</span>
+              <span className="flex-1 text-xs text-slate-700 dark:text-slate-200 truncate">
+                {r.subject}
+              </span>
               {posting === r.id &&
                 (doneTo === r.id ? (
                   <Check size={14} className="text-green-500 flex-shrink-0" />
@@ -1462,7 +1487,7 @@ function AttachNoteDialog({
               onOpenIssue?.(doneTo);
               onClose();
             }}
-            className="px-4 py-2 text-[11px] text-blue-600 hover:bg-blue-50 border-t border-slate-100 text-center"
+            className="px-4 py-2 text-[11px] text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 border-t border-slate-100 dark:border-slate-700 text-center"
           >
             Nota adicionada — abrir #{doneTo}
           </button>
@@ -1551,24 +1576,24 @@ function ReminderDialog({
       onClick={onClose}
     >
       <div
-        className="w-80 bg-white rounded-2xl shadow-2xl overflow-hidden"
+        className="w-80 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="Lembrar-me"
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-          <span className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
+          <span className="text-sm font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2">
             <Clock size={15} className="text-blue-500" /> Lembrar-me disto
           </span>
           <button
             onClick={onClose}
-            className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-600"
+            className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
           >
             <X size={14} />
           </button>
         </div>
         <div className="p-4 space-y-3">
-          <p className="text-[11px] text-slate-500 bg-slate-50 rounded-lg px-2.5 py-1.5 line-clamp-2">
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 rounded-lg px-2.5 py-1.5 line-clamp-2">
             {quote}
           </p>
           {done ? (
@@ -1583,7 +1608,7 @@ function ReminderDialog({
                     key={p.label}
                     onClick={() => schedule(p.at)}
                     disabled={busy}
-                    className="px-2 py-2 rounded-lg bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-300 text-xs text-slate-700 transition-colors disabled:opacity-60"
+                    className="px-2 py-2 rounded-lg bg-slate-50 dark:bg-slate-800/50 hover:bg-blue-50 dark:hover:bg-blue-950/40 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600 text-xs text-slate-700 dark:text-slate-200 transition-colors disabled:opacity-60"
                   >
                     {p.label}
                   </button>
@@ -1595,7 +1620,7 @@ function ReminderDialog({
                   value={custom}
                   min={toLocalInputValue(Date.now() + 60_000)}
                   onChange={(e) => setCustom(e.target.value)}
-                  className="flex-1 text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-400"
+                  className="flex-1 text-xs border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-400 dark:bg-slate-800"
                 />
                 <button
                   onClick={() => custom && schedule(new Date(custom).getTime())}
@@ -1606,7 +1631,7 @@ function ReminderDialog({
                 </button>
               </div>
               {permission === 'granted' ? (
-                <p className="text-[10px] text-slate-400 leading-snug">
+                <p className="text-[10px] text-slate-400 dark:text-slate-400 leading-snug">
                   O lembrete chega como notificação, mesmo com o app fechado.
                 </p>
               ) : permission === 'default' ? (
@@ -1650,6 +1675,7 @@ function Bubble({
   onReply,
   onEdit,
   onDelete,
+  onDeleteAttachment,
   onReact,
   onRetry,
   onCopy,
@@ -1686,6 +1712,7 @@ function Bubble({
   onReply: (msg: TalkMessage) => void;
   onEdit: (msg: TalkMessage) => void;
   onDelete: (msg: TalkMessage) => void;
+  onDeleteAttachment?: (msg: TalkMessage, path: string) => void;
   onReact: (msgId: number, emoji: string, remove: boolean) => void;
   onRetry?: (msg: TalkMessage) => void;
   onCopy?: (msg: TalkMessage) => void;
@@ -1739,7 +1766,7 @@ function Bubble({
     : '';
   const [showMenu, setShowMenu] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<false | 'delete' | 'removeAttachment'>(false);
   const [filePreview, setFilePreview] = useState(false);
   // Em telas de toque (sem hover) tocar na bolha revela a barra de ações.
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -1784,7 +1811,9 @@ function Bubble({
       {selectionMode && (
         <span
           className={`self-center flex-shrink-0 w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${
-            selected ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300 bg-white'
+            selected
+              ? 'bg-blue-600 border-blue-600 text-white'
+              : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800'
           }`}
         >
           {selected && <Check size={11} />}
@@ -1810,7 +1839,7 @@ function Bubble({
         {!isMe && showSender && (
           <button
             onClick={() => onAvatarClick?.(msg.actorId, msg.actorDisplayName)}
-            className="text-[10px] text-slate-400 mb-0.5 px-1 hover:text-blue-500 hover:underline transition-colors"
+            className="text-[10px] text-slate-400 dark:text-slate-400 mb-0.5 px-1 hover:text-blue-500 dark:hover:text-blue-400 hover:underline transition-colors"
           >
             {msg.actorDisplayName.split(' ')[0]}
           </button>
@@ -1825,12 +1854,12 @@ function Bubble({
               className={`absolute top-0 z-20 -translate-y-1/2 ${isMe ? 'right-1' : 'left-1'} flex items-center gap-0.5 transition-opacity ${
                 showEmoji || showMenu || actionsOpen
                   ? 'opacity-100'
-                  : 'opacity-0 group-hover:opacity-100'
+                  : 'opacity-40 group-hover:opacity-100'
               }`}
             >
               <button
                 onClick={() => setShowEmoji((v) => !v)}
-                className="p-1 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-slate-600 shadow-sm"
+                className="p-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 shadow-sm"
                 title="Reagir"
                 aria-label="Reagir"
               >
@@ -1839,7 +1868,7 @@ function Bubble({
               {msg.isReplyable && (
                 <button
                   onClick={() => onReply(msg)}
-                  className="p-1 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-slate-600 shadow-sm"
+                  className="p-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 shadow-sm"
                   title="Responder"
                   aria-label="Responder"
                 >
@@ -1851,7 +1880,7 @@ function Bubble({
                   onClick={() => {
                     setShowMenu((v) => !v);
                   }}
-                  className="p-1 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-slate-600 shadow-sm"
+                  className="p-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 shadow-sm"
                   title="Mais"
                   aria-label="Mais ações"
                 >
@@ -1859,30 +1888,36 @@ function Bubble({
                 </button>
                 {showMenu && (
                   <div
-                    className={`absolute top-full mt-1 ${isMe ? 'right-0' : 'left-0'} z-20 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden min-w-[150px]`}
+                    className={`absolute top-full mt-1 ${isMe ? 'right-0' : 'left-0'} z-20 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden min-w-[150px]`}
                     onMouseLeave={() => {
                       if (!confirmDelete) setShowMenu(false);
                     }}
                   >
                     {confirmDelete ? (
                       <div className="p-2">
-                        <p className="text-[11px] text-slate-600 px-1 pb-1.5">
-                          Excluir esta mensagem?
+                        <p className="text-[11px] text-slate-600 dark:text-slate-300 px-1 pb-1.5">
+                          {confirmDelete === 'removeAttachment'
+                            ? 'Remover este arquivo do Nextcloud? Ele some para todos.'
+                            : 'Excluir esta mensagem?'}
                         </p>
                         <div className="flex gap-1.5">
                           <button
                             onClick={() => {
-                              onDelete(msg);
+                              if (confirmDelete === 'removeAttachment' && file?.path) {
+                                onDeleteAttachment?.(msg, file.path);
+                              } else {
+                                onDelete(msg);
+                              }
                               setShowMenu(false);
                               setConfirmDelete(false);
                             }}
                             className="flex-1 px-2 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white text-[11px] font-medium transition-colors"
                           >
-                            Excluir
+                            {confirmDelete === 'removeAttachment' ? 'Remover' : 'Excluir'}
                           </button>
                           <button
                             onClick={() => setConfirmDelete(false)}
-                            className="flex-1 px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-medium transition-colors"
+                            className="flex-1 px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 text-[11px] font-medium transition-colors"
                           >
                             Cancelar
                           </button>
@@ -1895,7 +1930,7 @@ function Bubble({
                             onCopy?.(msg);
                             setShowMenu(false);
                           }}
-                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-xs text-slate-700"
+                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs text-slate-700 dark:text-slate-200"
                         >
                           <Copy size={12} /> Copiar
                         </button>
@@ -1904,7 +1939,7 @@ function Bubble({
                             onForward?.(msg);
                             setShowMenu(false);
                           }}
-                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-xs text-slate-700"
+                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs text-slate-700 dark:text-slate-200"
                         >
                           <CornerUpRight size={12} /> Encaminhar
                         </button>
@@ -1914,7 +1949,7 @@ function Bubble({
                               doTranslate();
                               setShowMenu(false);
                             }}
-                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-xs text-slate-700"
+                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs text-slate-700 dark:text-slate-200"
                           >
                             <Languages size={12} /> {translated ? 'Ocultar tradução' : 'Traduzir'}
                           </button>
@@ -1925,7 +1960,7 @@ function Bubble({
                               onReplyPrivately(msg);
                               setShowMenu(false);
                             }}
-                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-xs text-slate-700"
+                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs text-slate-700 dark:text-slate-200"
                           >
                             <Reply size={12} /> Responder no privado
                           </button>
@@ -1935,7 +1970,7 @@ function Bubble({
                             onCreateTask?.(msg);
                             setShowMenu(false);
                           }}
-                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-xs text-slate-700"
+                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs text-slate-700 dark:text-slate-200"
                         >
                           <ListPlus size={12} /> Criar tarefa
                         </button>
@@ -1945,7 +1980,7 @@ function Bubble({
                               onAttachToIssue(msg);
                               setShowMenu(false);
                             }}
-                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-xs text-slate-700"
+                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs text-slate-700 dark:text-slate-200"
                           >
                             <Hash size={12} /> Adicionar a uma tarefa
                           </button>
@@ -1956,7 +1991,7 @@ function Bubble({
                               onSaveMessage(msg);
                               setShowMenu(false);
                             }}
-                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-xs text-slate-700"
+                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs text-slate-700 dark:text-slate-200"
                           >
                             {saved ? (
                               <>
@@ -1975,7 +2010,7 @@ function Bubble({
                               onScheduleReminder(msg);
                               setShowMenu(false);
                             }}
-                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-xs text-slate-700"
+                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs text-slate-700 dark:text-slate-200"
                           >
                             <Clock size={12} /> Lembrar-me disto
                           </button>
@@ -1985,7 +2020,7 @@ function Bubble({
                             onStartSelect?.(msg);
                             setShowMenu(false);
                           }}
-                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-xs text-slate-700"
+                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs text-slate-700 dark:text-slate-200"
                         >
                           <ListChecks size={12} /> Selecionar
                         </button>
@@ -1995,7 +2030,7 @@ function Bubble({
                               onTogglePin(msg);
                               setShowMenu(false);
                             }}
-                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-xs text-slate-700"
+                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs text-slate-700 dark:text-slate-200"
                           >
                             {pinned ? (
                               <>
@@ -2008,24 +2043,36 @@ function Bubble({
                             )}
                           </button>
                         )}
-                        {isMe && (
+                        {/* Compartilhamentos de arquivo chegam do Nextcloud como systemMessage
+                            (ex.: "file_shared"), não como comment normal — o Talk responde 405
+                            a PUT/DELETE em /messages/{id} nesses casos. Como alternativa,
+                            oferecemos remover o arquivo real via WebDAV. */}
+                        {isMe && !msg.systemMessage && (
                           <>
                             <button
                               onClick={() => {
                                 onEdit(msg);
                                 setShowMenu(false);
                               }}
-                              className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-xs text-slate-700"
+                              className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs text-slate-700 dark:text-slate-200"
                             >
                               <Pencil size={12} /> Editar
                             </button>
                             <button
-                              onClick={() => setConfirmDelete(true)}
+                              onClick={() => setConfirmDelete('delete')}
                               className="w-full flex items-center gap-2 px-3 py-2 hover:bg-red-50 text-xs text-red-600"
                             >
                               <Trash2 size={12} /> Excluir
                             </button>
                           </>
+                        )}
+                        {isMe && !!msg.systemMessage && !!file?.path && !msg._attachmentRemoved && (
+                          <button
+                            onClick={() => setConfirmDelete('removeAttachment')}
+                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-red-50 text-xs text-red-600"
+                          >
+                            <Trash2 size={12} /> Remover arquivo
+                          </button>
                         )}
                       </>
                     )}
@@ -2061,7 +2108,13 @@ function Bubble({
                   : `talk-bubble-in bg-slate-100 text-slate-800 ${!grouped ? 'rounded-bl-sm' : ''}`
             }`}
           >
-            {file ? (
+            {file && msg._attachmentRemoved ? (
+              <span
+                className={`flex items-center gap-1.5 italic opacity-80 px-2 py-1 ${isMe ? 'text-white' : 'text-slate-500'}`}
+              >
+                <Trash2 size={12} className="flex-shrink-0" /> Arquivo removido
+              </span>
+            ) : file ? (
               <>
                 {isImage ? (
                   <TalkImage
@@ -2089,7 +2142,7 @@ function Bubble({
                         ? 'Visualizar arquivo'
                         : 'Baixar arquivo'
                     }
-                    className={`flex items-center gap-1.5 text-left hover:underline ${isMe ? 'text-white' : 'text-blue-700'}`}
+                    className={`flex items-center gap-1.5 text-left hover:underline ${isMe ? 'text-white' : 'text-blue-700 dark:text-blue-400'}`}
                   >
                     <Download size={13} className="flex-shrink-0 opacity-80" />
                     <span className="break-all">{file.name}</span>
@@ -2113,15 +2166,15 @@ function Bubble({
           <div
             className={`mt-1 max-w-full text-xs rounded-xl px-3 py-1.5 border ${
               isMe
-                ? 'bg-blue-50 border-blue-100 text-slate-700'
-                : 'bg-slate-50 border-slate-200 text-slate-700'
+                ? 'bg-blue-50 dark:bg-blue-950/40 border-blue-100 dark:border-blue-800 text-slate-700 dark:text-slate-200'
+                : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
             }`}
           >
-            <div className="flex items-center gap-1 text-[9px] font-semibold text-slate-400 uppercase tracking-wide mb-0.5">
+            <div className="flex items-center gap-1 text-[9px] font-semibold text-slate-400 dark:text-slate-400 uppercase tracking-wide mb-0.5">
               <Languages size={10} /> Tradução
             </div>
             {translating ? (
-              <span className="flex items-center gap-1.5 text-slate-400">
+              <span className="flex items-center gap-1.5 text-slate-400 dark:text-slate-400">
                 <Loader2 size={11} className="animate-spin" /> Traduzindo…
               </span>
             ) : translateErr ? (
@@ -2165,7 +2218,7 @@ function Bubble({
           ) : (
             <>
               <span
-                className="text-[9px] text-slate-400"
+                className="text-[9px] text-slate-400 dark:text-slate-400"
                 title={format(new Date(msg.timestamp * 1000), "d 'de' MMMM 'de' yyyy 'às' HH:mm", {
                   locale: ptBR,
                 })}
@@ -2174,7 +2227,7 @@ function Bubble({
               </span>
               {!!msg.lastEditTimestamp && msg.lastEditTimestamp > 0 && (
                 <span
-                  className="text-[9px] italic text-slate-400"
+                  className="text-[9px] italic text-slate-400 dark:text-slate-400"
                   title={`Editada ${format(
                     new Date(msg.lastEditTimestamp * 1000),
                     "d 'de' MMMM 'às' HH:mm",
@@ -2189,7 +2242,7 @@ function Bubble({
                 </span>
               )}
               {isMe && msg._status === 'sending' && (
-                <Loader2 size={11} className="text-slate-400 animate-spin" />
+                <Loader2 size={11} className="text-slate-400 dark:text-slate-400 animate-spin" />
               )}
               {isMe && !msg._status && (
                 <button
@@ -2204,13 +2257,17 @@ function Bubble({
                       strokeWidth={2.5}
                       className={
                         readers.length >= numActiveParticipants && numActiveParticipants > 0
-                          ? 'text-blue-500'
-                          : 'text-slate-400'
+                          ? 'text-blue-500 dark:text-blue-400'
+                          : 'text-slate-400 dark:text-slate-400'
                       }
                     />
                   ) : (
                     // ✓ = enviada (ainda não lida, ou servidor não compartilha leitura).
-                    <Check size={11} strokeWidth={2.5} className="text-slate-400" />
+                    <Check
+                      size={11}
+                      strokeWidth={2.5}
+                      className="text-slate-400 dark:text-slate-400"
+                    />
                   )}
                   {readStatusAvailable && readers.length > 0 && (
                     <div className="absolute bottom-full mb-1 right-0 hidden group-hover/receipt:block z-50 w-max max-w-[200px] bg-slate-800 text-white text-[10px] py-1 px-2 rounded shadow-lg text-left">
@@ -2255,12 +2312,14 @@ function TypingIndicator({
         {[0, 1, 2].map((i) => (
           <div
             key={i}
-            className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"
+            className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce"
             style={{ animationDelay: `${i * 0.15}s` }}
           />
         ))}
       </div>
-      <span className="text-[10px] text-slate-400">{names} está digitando…</span>
+      <span className="text-[10px] text-slate-400 dark:text-slate-400">
+        {names} está digitando…
+      </span>
     </div>
   );
 }
@@ -2596,7 +2655,7 @@ function MessageInput({
   return (
     <div className="relative flex-shrink-0">
       {filtered.length > 0 && (
-        <div className="absolute bottom-full left-2 right-2 mb-1 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden z-10">
+        <div className="absolute bottom-full left-2 right-2 mb-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden z-10">
           {filtered.map((p) => (
             <button
               key={p.actorId}
@@ -2604,7 +2663,7 @@ function MessageInput({
                 e.preventDefault();
                 insertMention(p);
               }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-50 text-left transition-colors"
+              className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 text-left transition-colors"
             >
               {p.actorId === 'all' ? (
                 <div className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0">
@@ -2616,10 +2675,10 @@ function MessageInput({
                 </div>
               )}
               <div className="min-w-0">
-                <span className="text-xs font-medium text-slate-700 truncate block">
+                <span className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate block">
                   {p.displayName}
                 </span>
-                <span className="text-[10px] text-slate-400">
+                <span className="text-[10px] text-slate-400 dark:text-slate-400">
                   {p.actorId === 'all' ? 'Notifica todos os participantes' : p.actorId}
                 </span>
               </div>
@@ -2630,7 +2689,7 @@ function MessageInput({
 
       {/* Autocomplete de #issue */}
       {issueQuery !== null && issueResults.length > 0 && (
-        <div className="absolute bottom-full left-2 right-2 mb-1 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden z-10 max-h-48 overflow-y-auto">
+        <div className="absolute bottom-full left-2 right-2 mb-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden z-10 max-h-48 overflow-y-auto">
           {issueResults.slice(0, 6).map((issue) => (
             <button
               key={issue.id}
@@ -2638,16 +2697,16 @@ function MessageInput({
                 e.preventDefault();
                 insertIssueMention(issue);
               }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-50 text-left transition-colors"
+              className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 text-left transition-colors"
             >
-              <div className="w-6 h-6 rounded bg-blue-100 flex items-center justify-center text-blue-700 text-[9px] font-bold flex-shrink-0 font-mono">
+              <div className="w-6 h-6 rounded bg-blue-100 dark:bg-blue-950/40 flex items-center justify-center text-blue-700 dark:text-blue-300 text-[9px] font-bold flex-shrink-0 font-mono">
                 #
               </div>
               <div className="min-w-0">
-                <span className="text-xs font-medium text-slate-700 truncate block">
+                <span className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate block">
                   {issue.subject}
                 </span>
-                <span className="text-[10px] text-slate-400">#{issue.id}</span>
+                <span className="text-[10px] text-slate-400 dark:text-slate-400">#{issue.id}</span>
               </div>
             </button>
           ))}
@@ -2656,17 +2715,20 @@ function MessageInput({
 
       {/* Citação do reply */}
       {replyTo && (
-        <div className="flex items-center gap-2 px-3 pt-2 pb-1 border-t border-slate-100 bg-slate-50">
+        <div className="flex items-center gap-2 px-3 pt-2 pb-1 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
           <Reply size={12} className="text-blue-500 flex-shrink-0" />
           <div className="flex-1 min-w-0">
-            <span className="text-[10px] font-semibold text-slate-500">
+            <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">
               {replyTo.actorDisplayName.split(' ')[0]}:{' '}
             </span>
-            <span className="text-[10px] text-slate-400 truncate">
+            <span className="text-[10px] text-slate-400 dark:text-slate-400 truncate">
               {resolveMessageText(replyTo).slice(0, 80)}
             </span>
           </div>
-          <button onClick={onCancelReply} className="text-slate-400 hover:text-slate-600">
+          <button
+            onClick={onCancelReply}
+            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+          >
             <X size={12} />
           </button>
         </div>
@@ -2674,7 +2736,7 @@ function MessageInput({
 
       {/* Rascunho de anexo (preview antes de enviar) */}
       {pendingFile && !uploading && (
-        <div className="flex items-center gap-2.5 px-3 pt-2 pb-1 border-t border-slate-100 bg-slate-50">
+        <div className="flex items-center gap-2.5 px-3 pt-2 pb-1 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
           {pendingPreview ? (
             <img
               src={pendingPreview}
@@ -2682,19 +2744,21 @@ function MessageInput({
               className="w-12 h-12 rounded-lg object-cover flex-shrink-0"
             />
           ) : (
-            <div className="w-12 h-12 rounded-lg bg-slate-200 flex items-center justify-center flex-shrink-0">
-              <Paperclip size={18} className="text-slate-400" />
+            <div className="w-12 h-12 rounded-lg bg-slate-200 dark:bg-slate-700 flex items-center justify-center flex-shrink-0">
+              <Paperclip size={18} className="text-slate-400 dark:text-slate-400" />
             </div>
           )}
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium text-slate-700 truncate">{pendingFile.name}</p>
-            <p className="text-[10px] text-slate-400">
+            <p className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate">
+              {pendingFile.name}
+            </p>
+            <p className="text-[10px] text-slate-400 dark:text-slate-400">
               {(pendingFile.size / 1024).toFixed(0)} KB · adicione uma descrição abaixo
             </p>
           </div>
           <button
             onClick={clearPendingFile}
-            className="text-slate-400 hover:text-slate-600 flex-shrink-0"
+            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 flex-shrink-0"
             title="Remover anexo"
           >
             <X size={14} />
@@ -2703,32 +2767,34 @@ function MessageInput({
       )}
 
       {uploading && (
-        <div className="px-3 pt-2 pb-1 border-t border-slate-100">
-          <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
+        <div className="px-3 pt-2 pb-1 border-t border-slate-100 dark:border-slate-700">
+          <div className="h-1 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
             <div
               className="h-full bg-blue-500 transition-all duration-200 rounded-full"
               style={{ width: `${uploadPct}%` }}
             />
           </div>
-          <p className="text-[10px] text-slate-400 mt-0.5">Enviando… {uploadPct}%</p>
+          <p className="text-[10px] text-slate-400 dark:text-slate-400 mt-0.5">
+            Enviando… {uploadPct}%
+          </p>
         </div>
       )}
       {uploadError && <p className="px-3 pb-1 text-[10px] text-red-500">{uploadError}</p>}
 
       {voice.recording ? (
         // Barra de gravação de voz: cancelar · timer · enviar
-        <div className="flex items-center gap-2 px-3 py-2 border-t border-slate-100">
+        <div className="flex items-center gap-2 px-3 py-2 border-t border-slate-100 dark:border-slate-700">
           <button
             onClick={voice.cancel}
             title="Cancelar"
-            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0"
+            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg transition-colors flex-shrink-0"
           >
             <Trash2 size={15} />
           </button>
-          <div className="flex-1 flex items-center gap-2 text-xs text-slate-600">
+          <div className="flex-1 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
             <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
             <span className="font-medium tabular-nums">{fmtDur(voice.seconds)}</span>
-            <span className="text-slate-400">Gravando…</span>
+            <span className="text-slate-400 dark:text-slate-400">Gravando…</span>
           </div>
           <button
             onClick={sendVoice}
@@ -2740,7 +2806,7 @@ function MessageInput({
           </button>
         </div>
       ) : (
-        <div className="relative flex items-center gap-1.5 px-3 py-2 border-t border-slate-100">
+        <div className="relative flex items-center gap-1.5 px-3 py-2 border-t border-slate-100 dark:border-slate-700">
           {/* Toast de agendamento */}
           {scheduleMsg && (
             <div className="absolute -top-8 left-3 z-40 flex items-center gap-1.5 bg-slate-800 text-white text-[11px] px-2.5 py-1 rounded-lg shadow-lg">
@@ -2749,14 +2815,14 @@ function MessageInput({
           )}
           {/* Popover de sugestões de resposta (IA) */}
           {suggestions && (
-            <div className="absolute bottom-full left-2 right-2 mb-1 z-40 bg-white border border-slate-200 rounded-xl shadow-xl p-1.5 space-y-1">
+            <div className="absolute bottom-full left-2 right-2 mb-1 z-40 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl p-1.5 space-y-1">
               <div className="flex items-center justify-between px-1.5 pb-0.5">
-                <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-1">
+                <span className="text-[9px] font-semibold text-slate-400 dark:text-slate-400 uppercase tracking-wide flex items-center gap-1">
                   <Sparkles size={10} /> {input.trim() ? 'Ajustes de tom' : 'Sugestões'}
                 </span>
                 <button
                   onClick={() => setSuggestions(null)}
-                  className="text-slate-400 hover:text-slate-600"
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
                 >
                   <X size={12} />
                 </button>
@@ -2769,7 +2835,7 @@ function MessageInput({
                     setSuggestions(null);
                     setTimeout(() => inputRef.current?.focus(), 0);
                   }}
-                  className="w-full text-left text-xs text-slate-700 px-2 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
+                  className="w-full text-left text-xs text-slate-700 dark:text-slate-200 px-2 py-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
                 >
                   {s}
                 </button>
@@ -2778,14 +2844,14 @@ function MessageInput({
           )}
           {/* Popover de agendamento de mensagem */}
           {showSchedule && (
-            <div className="absolute bottom-full right-2 mb-1 z-40 w-60 bg-white border border-slate-200 rounded-xl shadow-xl p-2">
+            <div className="absolute bottom-full right-2 mb-1 z-40 w-60 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl p-2">
               <div className="flex items-center justify-between px-1 pb-1">
-                <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-1">
+                <span className="text-[9px] font-semibold text-slate-400 dark:text-slate-400 uppercase tracking-wide flex items-center gap-1">
                   <Clock size={10} /> Enviar depois
                 </span>
                 <button
                   onClick={() => setShowSchedule(false)}
-                  className="text-slate-400 hover:text-slate-600"
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
                 >
                   <X size={12} />
                 </button>
@@ -2796,7 +2862,7 @@ function MessageInput({
                     key={p.label}
                     onClick={() => scheduleCurrent(p.at)}
                     disabled={scheduling}
-                    className="px-1.5 py-1.5 rounded-lg bg-slate-50 hover:bg-blue-50 border border-slate-200 text-[11px] text-slate-700 transition-colors disabled:opacity-50"
+                    className="px-1.5 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800/50 hover:bg-blue-50 dark:hover:bg-blue-950/40 border border-slate-200 dark:border-slate-700 text-[11px] text-slate-700 dark:text-slate-200 transition-colors disabled:opacity-50"
                   >
                     {p.label}
                   </button>
@@ -2808,7 +2874,7 @@ function MessageInput({
                   value={customWhen}
                   min={toLocalInputValue(Date.now() + 60_000)}
                   onChange={(e) => setCustomWhen(e.target.value)}
-                  className="flex-1 text-[11px] border border-slate-200 rounded-lg px-1.5 py-1 focus:outline-none focus:border-blue-400"
+                  className="flex-1 text-[11px] border border-slate-200 dark:border-slate-700 rounded-lg px-1.5 py-1 focus:outline-none focus:border-blue-400 dark:bg-slate-800"
                 />
                 <button
                   onClick={() => customWhen && scheduleCurrent(new Date(customWhen).getTime())}
@@ -2825,7 +2891,7 @@ function MessageInput({
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
             title="Enviar arquivo"
-            className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors flex-shrink-0 disabled:opacity-40"
+            className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors flex-shrink-0 disabled:opacity-40"
           >
             <Paperclip size={14} />
           </button>
@@ -2834,7 +2900,7 @@ function MessageInput({
               onClick={() => setShowEmoji((v) => !v)}
               disabled={uploading}
               title="Emoji"
-              className={`p-1.5 rounded-lg transition-colors disabled:opacity-40 ${showEmoji ? 'text-blue-600 bg-blue-50' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
+              className={`p-1.5 rounded-lg transition-colors disabled:opacity-40 ${showEmoji ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
             >
               <Smile size={14} />
             </button>
@@ -2852,7 +2918,7 @@ function MessageInput({
               onClick={fetchSuggestions}
               disabled={uploading || suggesting}
               title={input.trim() ? 'Ajustar tom do rascunho (IA)' : 'Sugerir resposta (IA)'}
-              className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-slate-100 rounded-lg transition-colors flex-shrink-0 disabled:opacity-40"
+              className="p-1.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors flex-shrink-0 disabled:opacity-40"
             >
               {suggesting ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
             </button>
@@ -2883,14 +2949,14 @@ function MessageInput({
                   ? 'Adicione uma descrição… (opcional)'
                   : 'Mensagem… (@nome para mencionar)'
             }
-            className="flex-1 text-xs bg-slate-50 border border-slate-200 rounded-2xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-400 resize-none max-h-32 overflow-y-auto scrollbar-thin leading-relaxed"
+            className="flex-1 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-400 dark:placeholder-slate-500 resize-none max-h-32 overflow-y-auto scrollbar-thin leading-relaxed"
           />
           {input.trim() && !pendingFile && editValue === undefined && (
             <button
               onClick={() => setShowSchedule((v) => !v)}
               disabled={uploading}
               title="Enviar depois"
-              className={`p-1.5 rounded-lg transition-colors flex-shrink-0 disabled:opacity-40 ${showSchedule ? 'text-blue-600 bg-blue-50' : 'text-slate-400 hover:text-blue-600 hover:bg-slate-100'}`}
+              className={`p-1.5 rounded-lg transition-colors flex-shrink-0 disabled:opacity-40 ${showSchedule ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40' : 'text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
             >
               <Clock size={14} />
             </button>
@@ -2908,7 +2974,7 @@ function MessageInput({
               onClick={startVoice}
               disabled={uploading}
               title="Gravar mensagem de voz"
-              className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-slate-100 rounded-full transition-colors flex-shrink-0 disabled:opacity-40"
+              className="p-1.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors flex-shrink-0 disabled:opacity-40"
             >
               <Mic size={15} />
             </button>
@@ -2944,6 +3010,7 @@ function ChatWindow({
   const send = useSendMessage(room.token, myId, me?.displayName ?? '');
   const editMsg = useEditMessage(room.token);
   const deleteMsg = useDeleteMessage(room.token);
+  const deleteAttachment = useDeleteMessageAttachment(room.token);
   const react = useReaction(room.token);
   const { startCall, activeCall, poppedOut } = useJitsi();
 
@@ -3341,20 +3408,26 @@ function ChatWindow({
 
     const tryMarkRead = () => {
       if (document.hidden) return;
+      talkRead.set(room.token, lastMsgId); // marcador local antes do round-trip
       markMessagesRead(room.token, lastMsgId)
         .then(async () => {
           // Zera o badge desta sala IMEDIATAMENTE, sem esperar o /rooms recalcular.
           // Sem isto o "não lido" às vezes persiste: um poll de /rooms que começou
           // ANTES do POST /read resolve depois com a contagem antiga e, por dedupe do
           // React Query, sobrescreve o valor recém-zerado. cancelQueries descarta esse
-          // fetch em voo; o invalidate dispara um novo, já garantidamente pós-leitura.
+          // fetch em voo.
           await qc.cancelQueries({ queryKey: ['talk-rooms'] });
           qc.setQueryData<TalkRoom[]>(['talk-rooms'], (old) =>
             old?.map((r) =>
               r.token === room.token ? { ...r, unreadMessages: 0, unreadMention: false } : r,
             ),
           );
-          qc.invalidateQueries({ queryKey: ['talk-rooms'] });
+          // Reconciliação ATRASADA (não imediata): o recálculo de não-lidas do Nextcloud é
+          // eventual — um GET /rooms disparado logo após o /read costuma voltar com a
+          // contagem ANTIGA e desfaz o zero (o badge "pisca de volta" ~1s depois, principal
+          // causa da sensação de "não some"). Deixamos o zero otimista valer e só confirmamos
+          // com o servidor depois que ele assenta; o poll de 15s cobre o resto.
+          setTimeout(() => qc.invalidateQueries({ queryKey: ['talk-rooms'] }), 2500);
         })
         .catch(() => {});
     };
@@ -3584,7 +3657,7 @@ function ChatWindow({
 
   return (
     <div
-      className="flex flex-col bg-white border border-slate-200 rounded-t-xl shadow-2xl overflow-hidden relative"
+      className="flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-t-xl shadow-2xl overflow-hidden relative"
       style={{ width: size.w, height: size.h }}
       onDragEnter={handleDragEnter}
       onDragOver={(e) => e.preventDefault()}
@@ -3602,7 +3675,7 @@ function ChatWindow({
         <div className="talk-upload-overlay absolute inset-0 z-50 flex items-center justify-center bg-white/70 rounded-xl">
           <div className="flex flex-col items-center gap-2">
             <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-            <span className="text-xs text-slate-500">Enviando…</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400">Enviando…</span>
           </div>
         </div>
       )}
@@ -3629,7 +3702,7 @@ function ChatWindow({
           width="8"
           height="8"
           viewBox="0 0 8 8"
-          className="text-slate-300 hover:text-blue-400 transition-colors"
+          className="text-slate-300 dark:text-slate-600 hover:text-blue-400 transition-colors"
         >
           {[1, 4, 7].flatMap((x) =>
             [1, 4, 7].map((y) => (
@@ -3640,7 +3713,7 @@ function ChatWindow({
       </div>
 
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-white border-b border-slate-100 flex-shrink-0">
+      <div className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-700 flex-shrink-0">
         {isGroup ? (
           <button
             onClick={() => setShowGroupInfo(true)}
@@ -3648,14 +3721,14 @@ function ChatWindow({
             title="Informações do grupo"
           >
             <RoomAvatar room={room} size={28} />
-            <span className="flex-1 text-xs font-semibold text-slate-800 truncate group-hover/hdr:text-blue-600 transition-colors">
+            <span className="flex-1 text-xs font-semibold text-slate-800 dark:text-slate-100 truncate group-hover/hdr:text-blue-600 dark:group-hover/hdr:text-blue-400 transition-colors">
               {room.displayName}
             </span>
           </button>
         ) : (
           <>
             <RoomAvatar room={room} size={28} status={dmStatus} />
-            <span className="flex-1 text-xs font-semibold text-slate-800 truncate">
+            <span className="flex-1 text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
               {room.displayName}
             </span>
           </>
@@ -3677,7 +3750,7 @@ function ChatWindow({
         <div className="relative">
           <button
             onClick={() => setMenuOpen((v) => !v)}
-            className={`p-1 rounded transition-colors ${menuOpen ? 'bg-slate-200 text-slate-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
+            className={`p-1 rounded transition-colors ${menuOpen ? 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
             title="Mais ações"
           >
             <MoreVertical size={13} />
@@ -3686,30 +3759,30 @@ function ChatWindow({
             <>
               <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
               <div
-                className="absolute right-0 top-full mt-1 w-48 bg-white border border-slate-200 rounded-lg shadow-xl z-50 py-1 overflow-hidden"
+                className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl z-50 py-1 overflow-hidden"
                 onClick={() => setMenuOpen(false)}
               >
                 <button
                   onClick={() => setSearchOpen((v) => !v)}
-                  className="w-full text-left px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                  className="w-full text-left px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2"
                 >
                   <Search size={13} className="text-slate-400" /> Buscar
                 </button>
                 <button
                   onClick={() => setShowMedia(true)}
-                  className="w-full text-left px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                  className="w-full text-left px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2"
                 >
                   <Files size={13} className="text-slate-400" /> Arquivos e Links
                 </button>
                 <button
                   onClick={startVideoCall}
-                  className="w-full text-left px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                  className="w-full text-left px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2"
                 >
                   <Video size={13} className="text-slate-400" /> Iniciar Chamada
                 </button>
                 <button
                   onClick={() => setMuted(talkMute.toggle(room.token))}
-                  className="w-full text-left px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                  className="w-full text-left px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2"
                 >
                   {muted ? (
                     <BellOff size={13} className="text-amber-500" />
@@ -3724,13 +3797,13 @@ function ChatWindow({
         </div>
         <button
           onClick={onMinimize}
-          className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-600 transition-colors"
+          className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
         >
           <Minus size={12} />
         </button>
         <button
           onClick={onClose}
-          className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-600 transition-colors"
+          className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
         >
           <X size={12} />
         </button>
@@ -3778,7 +3851,7 @@ function ChatWindow({
 
       {/* Busca */}
       {searchOpen && (
-        <div className="border-b border-slate-100 bg-slate-50 flex-shrink-0">
+        <div className="border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 flex-shrink-0">
           <div className="px-3 py-2 flex items-center gap-2">
             <Search size={12} className="text-slate-400 flex-shrink-0" />
             <input
@@ -3792,7 +3865,7 @@ function ChatWindow({
                 }
               }}
               placeholder="Buscar em todo o histórico…"
-              className="flex-1 text-xs bg-transparent focus:outline-none placeholder-slate-400"
+              className="flex-1 text-xs bg-transparent focus:outline-none placeholder-slate-400 dark:placeholder-slate-500"
             />
             {searching && (
               <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
@@ -3800,7 +3873,7 @@ function ChatWindow({
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery('')}
-                className="text-slate-400 hover:text-slate-600"
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
               >
                 <X size={11} />
               </button>
@@ -3809,7 +3882,7 @@ function ChatWindow({
 
           {/* Resultados no histórico (servidor) */}
           {debouncedSearch.length >= 2 && (
-            <div className="max-h-48 overflow-y-auto border-t border-slate-100 scrollbar-thin">
+            <div className="max-h-48 overflow-y-auto border-t border-slate-100 dark:border-slate-700 scrollbar-thin">
               {jumpingTo !== null && (
                 <p className="text-[11px] text-blue-500 text-center py-2 flex items-center justify-center gap-1.5">
                   <span className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
@@ -3825,10 +3898,10 @@ function ChatWindow({
                 <button
                   key={r.id}
                   onClick={() => jumpToSearchResult(r.id)}
-                  className="w-full flex flex-col gap-0.5 px-3 py-2 hover:bg-blue-50 text-left border-b border-slate-100 last:border-0 transition-colors"
+                  className="w-full flex flex-col gap-0.5 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-950/40 text-left border-b border-slate-100 dark:border-slate-700 last:border-0 transition-colors"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-semibold text-slate-600 truncate">
+                    <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 truncate">
                       {r.actorDisplayName}
                     </span>
                     {r.timestamp > 0 && (
@@ -3837,7 +3910,9 @@ function ChatWindow({
                       </span>
                     )}
                   </div>
-                  <span className="text-[11px] text-slate-500 line-clamp-2">{r.message}</span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2">
+                    {r.message}
+                  </span>
                 </button>
               ))}
             </div>
@@ -3869,8 +3944,10 @@ function ChatWindow({
           title="Ir para a mensagem fixada"
         >
           <Pin size={12} className="text-amber-500 flex-shrink-0 rotate-45" />
-          <span className="flex-1 min-w-0 text-[11px] text-slate-600 truncate">
-            <span className="font-semibold text-slate-700">{pinned.author}: </span>
+          <span className="flex-1 min-w-0 text-[11px] text-slate-600 dark:text-slate-300 truncate">
+            <span className="font-semibold text-slate-700 dark:text-slate-200">
+              {pinned.author}:{' '}
+            </span>
             {pinned.text}
           </span>
           <span
@@ -3906,7 +3983,7 @@ function ChatWindow({
               <button
                 onClick={loadMore}
                 disabled={loadingMore}
-                className="flex items-center gap-1.5 text-[11px] text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-full px-3 py-1 transition-colors disabled:opacity-50"
+                className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full px-3 py-1 transition-colors disabled:opacity-50"
               >
                 <ChevronUp size={12} />
                 {loadingMore ? 'Carregando…' : 'Carregar mais'}
@@ -3915,12 +3992,12 @@ function ChatWindow({
           )}
 
           {isLoading && (
-            <div className="flex items-center justify-center h-20 text-slate-400 text-xs">
+            <div className="flex items-center justify-center h-20 text-slate-400 dark:text-slate-400 text-xs">
               Carregando…
             </div>
           )}
           {!isLoading && visibleMessages.length === 0 && (
-            <div className="flex items-center justify-center h-20 text-slate-400 text-xs">
+            <div className="flex items-center justify-center h-20 text-slate-400 dark:text-slate-400 text-xs">
               Nenhuma mensagem ainda
             </div>
           )}
@@ -3972,6 +4049,12 @@ function ChatWindow({
                     // A exclusão otimista atua na query viva; se a mensagem veio do
                     // histórico paginado, remove-a daqui também para sumir na hora.
                     setOlderMessages((prev) => prev.filter((m) => m.id !== msg.id));
+                  }}
+                  onDeleteAttachment={(msg, path) => {
+                    deleteAttachment.mutate({ messageId: msg.id, path });
+                    setOlderMessages((prev) =>
+                      prev.map((m) => (m.id === msg.id ? { ...m, _attachmentRemoved: true } : m)),
+                    );
                   }}
                   onReact={(msgId, emoji, remove) =>
                     react.mutate({ messageId: msgId, reaction: emoji, remove })
@@ -4097,10 +4180,10 @@ function ChatWindow({
       )}
 
       {preparingTask && (
-        <div className="absolute inset-0 z-[60] flex items-center justify-center bg-white/70 rounded-xl">
+        <div className="absolute inset-0 z-[60] flex items-center justify-center bg-white/70 dark:bg-slate-900/70 rounded-xl">
           <div className="flex flex-col items-center gap-2">
             <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-            <span className="text-xs text-slate-500">Preparando anexos…</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400">Preparando anexos…</span>
           </div>
         </div>
       )}
@@ -4256,14 +4339,14 @@ function GroupInfoPanel({
       onClick={onClose}
     >
       <div
-        className="w-80 max-h-[85vh] flex flex-col bg-white rounded-2xl shadow-2xl overflow-hidden"
+        className="w-80 max-h-[85vh] flex flex-col bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Cabeçalho com avatar e nome */}
-        <div className="relative flex flex-col items-center pt-6 pb-4 px-5 bg-gradient-to-b from-indigo-50 to-white flex-shrink-0">
+        <div className="relative flex flex-col items-center pt-6 pb-4 px-5 bg-gradient-to-b from-indigo-50 to-white dark:from-indigo-950/40 dark:to-slate-900 flex-shrink-0">
           <button
             onClick={onClose}
-            className="absolute top-2 right-2 p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+            className="absolute top-2 right-2 p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
           >
             <X size={14} />
           </button>
@@ -4303,7 +4386,7 @@ function GroupInfoPanel({
                     setEditingName(false);
                   }
                 }}
-                className="flex-1 text-sm font-semibold text-center bg-white border border-blue-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                className="flex-1 text-sm font-semibold text-center bg-white dark:bg-slate-800 border border-blue-300 dark:border-blue-700 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-400"
               />
               <button
                 onClick={saveName}
@@ -4316,13 +4399,13 @@ function GroupInfoPanel({
           ) : (
             <button
               onClick={() => canModerate && setEditingName(true)}
-              className={`mt-3 text-base font-semibold text-slate-800 text-center flex items-center gap-1.5 ${canModerate ? 'hover:text-blue-600' : 'cursor-default'}`}
+              className={`mt-3 text-base font-semibold text-slate-800 dark:text-slate-100 text-center flex items-center gap-1.5 ${canModerate ? 'hover:text-blue-600 dark:hover:text-blue-400' : 'cursor-default'}`}
             >
               {room.displayName}
-              {canModerate && <Pencil size={11} className="text-slate-300" />}
+              {canModerate && <Pencil size={11} className="text-slate-300 dark:text-slate-600" />}
             </button>
           )}
-          <p className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1">
+          <p className="text-[11px] text-slate-400 dark:text-slate-400 mt-0.5 flex items-center gap-1">
             <Users size={11} /> {participants.length} participante
             {participants.length !== 1 ? 's' : ''}
           </p>
@@ -4332,13 +4415,13 @@ function GroupInfoPanel({
           {/* Descrição / tópico */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
+              <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-400 uppercase tracking-wide">
                 Descrição
               </span>
               {canModerate && !editingDesc && (
                 <button
                   onClick={() => setEditingDesc(true)}
-                  className="text-slate-300 hover:text-blue-500"
+                  className="text-slate-300 dark:text-slate-600 hover:text-blue-500 dark:hover:text-blue-400"
                 >
                   <Pencil size={11} />
                 </button>
@@ -4351,7 +4434,7 @@ function GroupInfoPanel({
                   onChange={(e) => setDesc(e.target.value)}
                   rows={3}
                   placeholder="Tópico do grupo…"
-                  className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
+                  className="w-full text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
                 />
                 <div className="flex gap-1.5 justify-end">
                   <button
@@ -4359,7 +4442,7 @@ function GroupInfoPanel({
                       setDesc((room as unknown as { description?: string }).description ?? '');
                       setEditingDesc(false);
                     }}
-                    className="px-2 py-1 text-[11px] text-slate-500 hover:bg-slate-100 rounded-lg"
+                    className="px-2 py-1 text-[11px] text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
                   >
                     Cancelar
                   </button>
@@ -4373,8 +4456,10 @@ function GroupInfoPanel({
                 </div>
               </div>
             ) : (
-              <p className="text-xs text-slate-500 whitespace-pre-wrap">
-                {desc || <span className="text-slate-300 italic">Sem descrição</span>}
+              <p className="text-xs text-slate-500 dark:text-slate-400 whitespace-pre-wrap">
+                {desc || (
+                  <span className="text-slate-300 dark:text-slate-600 italic">Sem descrição</span>
+                )}
               </p>
             )}
           </div>
@@ -4382,7 +4467,7 @@ function GroupInfoPanel({
           {/* Participantes */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
+              <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-400 uppercase tracking-wide">
                 Participantes
               </span>
               {canModerate && (
@@ -4397,15 +4482,15 @@ function GroupInfoPanel({
 
             {/* Busca para adicionar */}
             {addOpen && canModerate && (
-              <div className="mb-2 border border-slate-200 rounded-lg overflow-hidden">
-                <div className="flex items-center gap-2 px-2.5 py-1.5 bg-slate-50 border-b border-slate-100">
+              <div className="mb-2 border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
+                <div className="flex items-center gap-2 px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-700">
                   <Search size={12} className="text-slate-400" />
                   <input
                     autoFocus
                     value={addQuery}
                     onChange={(e) => setAddQuery(e.target.value)}
                     placeholder="Buscar usuário…"
-                    className="flex-1 text-xs bg-transparent focus:outline-none placeholder-slate-400"
+                    className="flex-1 text-xs bg-transparent focus:outline-none placeholder-slate-400 dark:placeholder-slate-500"
                   />
                 </div>
                 <div className="max-h-32 overflow-y-auto">
@@ -4421,10 +4506,12 @@ function GroupInfoPanel({
                         key={u.id}
                         onClick={() => handleAdd(u.id)}
                         disabled={busy}
-                        className="w-full flex items-center gap-2 px-2.5 py-1.5 hover:bg-blue-50 text-left"
+                        className="w-full flex items-center gap-2 px-2.5 py-1.5 hover:bg-blue-50 dark:hover:bg-blue-950/40 text-left"
                       >
                         <TalkAvatar actorId={u.id} displayName={u.label} size={22} />
-                        <span className="text-xs text-slate-700 truncate">{u.label}</span>
+                        <span className="text-xs text-slate-700 dark:text-slate-200 truncate">
+                          {u.label}
+                        </span>
                       </button>
                     ))}
                 </div>
@@ -4447,9 +4534,11 @@ function GroupInfoPanel({
                         status={statuses?.get(p.actorId)?.status}
                       />
                       <div className="flex-1 min-w-0">
-                        <span className="text-xs text-slate-700 truncate block">
+                        <span className="text-xs text-slate-700 dark:text-slate-200 truncate block">
                           {p.displayName}
-                          {isMe && <span className="text-slate-400"> (você)</span>}
+                          {isMe && (
+                            <span className="text-slate-400 dark:text-slate-400"> (você)</span>
+                          )}
                         </span>
                         {role && (
                           <span className="text-[9px] text-amber-600 flex items-center gap-0.5">
@@ -4463,7 +4552,7 @@ function GroupInfoPanel({
                             onClick={() => handleToggleMod(p)}
                             disabled={busy}
                             title={isMod ? 'Remover moderador' : 'Tornar moderador'}
-                            className={`p-1 rounded-lg ${isMod ? 'text-amber-500 hover:bg-amber-50' : 'text-slate-400 hover:bg-slate-100'}`}
+                            className={`p-1 rounded-lg ${isMod ? 'text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/40' : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                           >
                             <Crown size={12} />
                           </button>
@@ -4471,7 +4560,7 @@ function GroupInfoPanel({
                             onClick={() => handleRemove(p.attendeeId)}
                             disabled={busy}
                             title="Remover do grupo"
-                            className="p-1 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50"
+                            className="p-1 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40"
                           >
                             <UserMinus size={12} />
                           </button>
@@ -4485,13 +4574,15 @@ function GroupInfoPanel({
         </div>
 
         {/* Sair do grupo */}
-        <div className="flex-shrink-0 px-5 py-3 border-t border-slate-100">
+        <div className="flex-shrink-0 px-5 py-3 border-t border-slate-100 dark:border-slate-700">
           {confirmLeave ? (
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-600 flex-1">Sair deste grupo?</span>
+              <span className="text-xs text-slate-600 dark:text-slate-300 flex-1">
+                Sair deste grupo?
+              </span>
               <button
                 onClick={() => setConfirmLeave(false)}
-                className="px-2 py-1 text-[11px] text-slate-500 hover:bg-slate-100 rounded-lg"
+                className="px-2 py-1 text-[11px] text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
               >
                 Cancelar
               </button>
@@ -4506,7 +4597,7 @@ function GroupInfoPanel({
           ) : (
             <button
               onClick={() => setConfirmLeave(true)}
-              className="w-full flex items-center justify-center gap-2 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+              className="w-full flex items-center justify-center gap-2 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-xl transition-colors"
             >
               <LogOut size={14} /> Sair do grupo
             </button>
@@ -4570,19 +4661,19 @@ function ShareThumb({ msg }: { msg: TalkMessage }) {
       title={file?.name}
       className="group/sh flex flex-col gap-1 text-left"
     >
-      <div className="relative aspect-square w-full rounded-lg overflow-hidden bg-slate-100 flex items-center justify-center border border-slate-200 group-hover/sh:border-blue-300 transition-colors">
+      <div className="relative aspect-square w-full rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800 flex items-center justify-center border border-slate-200 dark:border-slate-700 group-hover/sh:border-blue-300 dark:group-hover/sh:border-blue-600 transition-colors">
         {src ? (
           <img src={src} alt={file?.name} className="w-full h-full object-cover" />
         ) : (
           <FileText size={22} className="text-slate-400" />
         )}
         {!isImage && (
-          <span className="absolute bottom-1 right-1 text-slate-400 group-hover/sh:text-blue-500">
+          <span className="absolute bottom-1 right-1 text-slate-400 group-hover/sh:text-blue-500 dark:group-hover/sh:text-blue-400">
             <Download size={12} />
           </span>
         )}
       </div>
-      <span className="text-[10px] text-slate-500 truncate">{file?.name}</span>
+      <span className="text-[10px] text-slate-500 dark:text-slate-400 truncate">{file?.name}</span>
     </button>
   );
 }
@@ -4648,27 +4739,29 @@ function MediaPanel({
       onClick={onClose}
     >
       <div
-        className="w-80 max-h-[85vh] flex flex-col bg-white rounded-2xl shadow-2xl overflow-hidden"
+        className="w-80 max-h-[85vh] flex flex-col bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 flex-shrink-0">
-          <span className="text-sm font-semibold text-slate-800">Compartilhados</span>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700 flex-shrink-0">
+          <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+            Compartilhados
+          </span>
           <button
             onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
           >
             <X size={14} />
           </button>
         </div>
 
         {/* Abas */}
-        <div className="flex border-b border-slate-100 flex-shrink-0">
+        <div className="flex border-b border-slate-100 dark:border-slate-700 flex-shrink-0">
           <button
             onClick={() => setTab('files')}
             className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors ${
               tab === 'files'
-                ? 'text-blue-600 border-b-2 border-blue-600'
-                : 'text-slate-400 hover:text-slate-600'
+                ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
+                : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
             }`}
           >
             <Files size={13} /> Arquivos {files.length > 0 && `(${files.length})`}
@@ -4677,8 +4770,8 @@ function MediaPanel({
             onClick={() => setTab('links')}
             className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors ${
               tab === 'links'
-                ? 'text-blue-600 border-b-2 border-blue-600'
-                : 'text-slate-400 hover:text-slate-600'
+                ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
+                : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
             }`}
           >
             <Link2 size={13} /> Links {links.length > 0 && `(${links.length})`}
@@ -4718,9 +4811,9 @@ function MediaPanel({
                     href={l.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="block px-2.5 py-2 rounded-lg hover:bg-blue-50 transition-colors border border-slate-100"
+                    className="block px-2.5 py-2 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors border border-slate-100 dark:border-slate-800"
                   >
-                    <span className="text-[11px] text-blue-600 truncate block break-all">
+                    <span className="text-[11px] text-blue-600 dark:text-blue-400 truncate block break-all">
                       {l.url}
                     </span>
                     <span className="text-[9px] text-slate-400">
@@ -4761,7 +4854,7 @@ function MessageInfoPanel({
   const Row = ({ p }: { p: TalkParticipant }) => (
     <div className="flex items-center gap-2 py-1">
       <TalkAvatar actorId={p.actorId} displayName={p.displayName} size={26} />
-      <span className="text-xs text-slate-700 truncate">{p.displayName}</span>
+      <span className="text-xs text-slate-700 dark:text-slate-200 truncate">{p.displayName}</span>
     </div>
   );
 
@@ -4771,25 +4864,27 @@ function MessageInfoPanel({
       onClick={onClose}
     >
       <div
-        className="w-80 max-h-[85vh] flex flex-col bg-white rounded-2xl shadow-2xl overflow-hidden"
+        className="w-80 max-h-[85vh] flex flex-col bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 flex-shrink-0">
-          <span className="text-sm font-semibold text-slate-800">Informações da mensagem</span>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700 flex-shrink-0">
+          <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+            Informações da mensagem
+          </span>
           <button
             onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
           >
             <X size={14} />
           </button>
         </div>
 
         {/* Prévia da mensagem */}
-        <div className="px-4 py-3 border-b border-slate-100 flex-shrink-0">
+        <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 flex-shrink-0">
           <div className="bg-blue-600 text-white text-xs rounded-2xl rounded-br-sm px-3 py-1.5 break-words [overflow-wrap:anywhere] max-h-24 overflow-y-auto scrollbar-thin">
             {preview}
           </div>
-          <p className="text-[10px] text-slate-400 mt-1 text-right">
+          <p className="text-[10px] text-slate-400 dark:text-slate-400 mt-1 text-right">
             Enviada{' '}
             {format(new Date(msg.timestamp * 1000), "d 'de' MMM 'às' HH:mm", { locale: ptBR })}
           </p>
@@ -4798,11 +4893,11 @@ function MessageInfoPanel({
         <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-3 space-y-4">
           {!readStatusAvailable ? (
             <div className="text-center py-4 px-2">
-              <Check size={22} className="mx-auto text-slate-300 mb-2" />
-              <p className="text-xs text-slate-500 font-medium">
+              <Check size={22} className="mx-auto text-slate-300 dark:text-slate-600 mb-2" />
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
                 Confirmação de leitura indisponível
               </p>
-              <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+              <p className="text-[11px] text-slate-400 dark:text-slate-400 mt-1 leading-relaxed">
                 Os participantes desta conversa estão com o <b>status de leitura privado</b> no
                 Nextcloud. Para ver quem leu, cada pessoa precisa ativar “Compartilhar status de
                 leitura” nas configurações de privacidade do Nextcloud.
@@ -4813,21 +4908,23 @@ function MessageInfoPanel({
               <div>
                 <div className="flex items-center gap-1.5 mb-1">
                   <CheckCheck size={13} className="text-blue-500" />
-                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
+                  <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-400 uppercase tracking-wide">
                     Lido por ({read.length})
                   </span>
                 </div>
                 {read.length > 0 ? (
                   read.map((p) => <Row key={p.actorId} p={p} />)
                 ) : (
-                  <p className="text-[11px] text-slate-400">Ninguém leu ainda</p>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-400">
+                    Ninguém leu ainda
+                  </p>
                 )}
               </div>
               {unread.length > 0 && (
                 <div>
                   <div className="flex items-center gap-1.5 mb-1">
                     <Check size={13} className="text-slate-400" />
-                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
+                    <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-400 uppercase tracking-wide">
                       Ainda não leu ({unread.length})
                     </span>
                   </div>
@@ -4841,7 +4938,7 @@ function MessageInfoPanel({
         </div>
 
         {readStatusAvailable && (
-          <p className="px-4 py-2 text-[9px] text-slate-300 border-t border-slate-100 flex-shrink-0">
+          <p className="px-4 py-2 text-[9px] text-slate-300 dark:text-slate-600 border-t border-slate-100 dark:border-slate-700 flex-shrink-0">
             O Nextcloud Talk não informa o horário exato de leitura por pessoa.
           </p>
         )}
@@ -4876,25 +4973,27 @@ function NewConversationDialog({
   };
 
   return (
-    <div className="absolute inset-0 z-[100] flex flex-col bg-white rounded-t-xl overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 flex-shrink-0">
-        <span className="text-sm font-semibold text-slate-800">Nova conversa</span>
+    <div className="absolute inset-0 z-[100] flex flex-col bg-white dark:bg-slate-900 rounded-t-xl overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700 flex-shrink-0">
+        <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+          Nova conversa
+        </span>
         <button
           onClick={onClose}
-          className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-600"
+          className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
         >
           <X size={14} />
         </button>
       </div>
-      <div className="px-3 py-2 border-b border-slate-100 flex-shrink-0">
-        <div className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-1.5">
+      <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-700 flex-shrink-0">
+        <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800/50 rounded-lg px-3 py-1.5">
           <Search size={13} className="text-slate-400 flex-shrink-0" />
           <input
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Buscar usuário…"
-            className="flex-1 text-xs bg-transparent focus:outline-none placeholder-slate-400"
+            className="flex-1 text-xs bg-transparent focus:outline-none placeholder-slate-400 dark:placeholder-slate-500"
           />
         </div>
       </div>
@@ -4904,7 +5003,7 @@ function NewConversationDialog({
           <div className="text-center py-4 text-xs text-slate-400">Nenhum usuário encontrado</div>
         )}
         {query.length < 2 && (
-          <div className="flex flex-col items-center justify-center h-full gap-2 text-slate-300">
+          <div className="flex flex-col items-center justify-center h-full gap-2 text-slate-300 dark:text-slate-600">
             <Search size={28} className="opacity-50" />
             <span className="text-xs text-slate-400">Digite pelo menos 2 caracteres</span>
           </div>
@@ -4914,13 +5013,15 @@ function NewConversationDialog({
             key={u.id}
             onClick={() => handleSelect(u)}
             disabled={createRoom.isPending}
-            className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 text-left transition-colors border-b border-slate-50 last:border-0"
+            className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800 text-left transition-colors border-b border-slate-50 dark:border-slate-800 last:border-0"
           >
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
               {(u.label || u.id).charAt(0).toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium text-slate-700 truncate">{u.label}</p>
+              <p className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate">
+                {u.label}
+              </p>
               <p className="text-[10px] text-slate-400 truncate">{u.id}</p>
             </div>
           </button>
@@ -5001,10 +5102,10 @@ function MyStatusMenu({ onClose }: { onClose: () => void }) {
   return (
     <div
       ref={ref}
-      className="absolute top-full left-0 mt-1 w-64 bg-white border border-slate-200 rounded-xl shadow-2xl z-[70] overflow-hidden"
+      className="absolute top-full left-0 mt-1 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl z-[70] overflow-hidden"
     >
-      <div className="px-3 py-2 border-b border-slate-100">
-        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1.5">
+      <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-700">
+        <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-400 uppercase tracking-wide mb-1.5">
           Disponibilidade
         </p>
         <div className="grid grid-cols-2 gap-1">
@@ -5015,8 +5116,8 @@ function MyStatusMenu({ onClose }: { onClose: () => void }) {
               disabled={busy}
               className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs transition-colors ${
                 my?.status === s.type
-                  ? 'bg-blue-50 text-blue-700 font-medium'
-                  : 'hover:bg-slate-50 text-slate-600'
+                  ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-medium'
+                  : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300'
               }`}
             >
               <span className={`w-2.5 h-2.5 rounded-full ${s.color}`} />
@@ -5026,7 +5127,7 @@ function MyStatusMenu({ onClose }: { onClose: () => void }) {
         </div>
       </div>
       <div className="px-3 py-2">
-        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1.5">
+        <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-400 uppercase tracking-wide mb-1.5">
           Status personalizado
         </p>
         <input
@@ -5036,7 +5137,7 @@ function MyStatusMenu({ onClose }: { onClose: () => void }) {
             if (e.key === 'Enter') saveMsg();
           }}
           placeholder="Em reunião, Focado 🎧…"
-          className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400 placeholder-slate-400"
+          className="w-full text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400 placeholder-slate-400 dark:placeholder-slate-500"
         />
         <div className="flex gap-1.5 mt-1.5">
           <button
@@ -5050,7 +5151,7 @@ function MyStatusMenu({ onClose }: { onClose: () => void }) {
             <button
               onClick={clearMsg}
               disabled={busy}
-              className="px-2.5 py-1.5 text-[11px] text-slate-500 hover:bg-slate-100 rounded-lg transition-colors"
+              className="px-2.5 py-1.5 text-[11px] text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
             >
               Limpar
             </button>
@@ -5112,13 +5213,13 @@ function SavedScheduledPanel({
       onClick={() => setTab(id)}
       className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium border-b-2 transition-colors ${
         tab === id
-          ? 'border-blue-500 text-blue-600'
-          : 'border-transparent text-slate-400 hover:text-slate-600'
+          ? 'border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400'
+          : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
       }`}
     >
       {label}
       {count > 0 && (
-        <span className="text-[9px] bg-slate-100 text-slate-500 rounded-full px-1.5 py-0.5">
+        <span className="text-[9px] bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-full px-1.5 py-0.5">
           {count}
         </span>
       )}
@@ -5131,19 +5232,21 @@ function SavedScheduledPanel({
       onClick={onClose}
     >
       <div
-        className="w-80 max-h-[75vh] flex flex-col bg-white rounded-2xl shadow-2xl overflow-hidden"
+        className="w-80 max-h-[75vh] flex flex-col bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-          <span className="text-sm font-semibold text-slate-800">Salvos e agendados</span>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
+          <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+            Salvos e agendados
+          </span>
           <button
             onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
           >
             <X size={14} />
           </button>
         </div>
-        <div className="flex border-b border-slate-100 flex-shrink-0">
+        <div className="flex border-b border-slate-100 dark:border-slate-700 flex-shrink-0">
           <Tab id="saved" label="Salvos" count={saved.length} />
           <Tab id="scheduled" label="Agendados" count={scheduled.length} />
         </div>
@@ -5152,7 +5255,7 @@ function SavedScheduledPanel({
           {tab === 'saved' && (
             <>
               {saved.length === 0 && (
-                <div className="flex flex-col items-center justify-center py-10 gap-2 text-slate-400">
+                <div className="flex flex-col items-center justify-center py-10 gap-2 text-slate-400 dark:text-slate-400">
                   <Bookmark size={22} />
                   <span className="text-xs">Nenhuma mensagem salva</span>
                   <span className="text-[10px] px-6 text-center">
@@ -5163,25 +5266,25 @@ function SavedScheduledPanel({
               {saved.map((m) => (
                 <div
                   key={`${m.roomToken}-${m.id}`}
-                  className="flex items-start gap-2 px-4 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 group"
+                  className="flex items-start gap-2 px-4 py-2.5 border-b border-slate-50 dark:border-slate-800 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800 group"
                 >
                   <BookmarkCheck size={13} className="text-amber-500 flex-shrink-0 mt-0.5" />
                   <button
                     onClick={() => openRoom(m.roomToken)}
                     className="flex-1 min-w-0 text-left"
                   >
-                    <p className="text-xs text-slate-700 line-clamp-2">
+                    <p className="text-xs text-slate-700 dark:text-slate-200 line-clamp-2">
                       <span className="font-semibold">{m.author}: </span>
                       {m.text}
                     </p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">
+                    <p className="text-[10px] text-slate-400 dark:text-slate-400 mt-0.5">
                       {m.roomName} · {format(new Date(m.savedAt), "dd/MM 'às' HH:mm")}
                     </p>
                   </button>
                   <button
                     onClick={() => talkSaved.remove(m.roomToken, m.id)}
                     title="Remover"
-                    className="flex-shrink-0 p-0.5 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="flex-shrink-0 p-0.5 text-slate-300 dark:text-slate-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
                   >
                     <X size={13} />
                   </button>
@@ -5193,7 +5296,7 @@ function SavedScheduledPanel({
           {tab === 'scheduled' && (
             <>
               {scheduled.length === 0 && (
-                <div className="flex flex-col items-center justify-center py-10 gap-2 text-slate-400">
+                <div className="flex flex-col items-center justify-center py-10 gap-2 text-slate-400 dark:text-slate-400">
                   <Clock size={22} />
                   <span className="text-xs">Nada agendado</span>
                   <span className="text-[10px] px-6 text-center">
@@ -5205,7 +5308,7 @@ function SavedScheduledPanel({
               {scheduled.map((it) => (
                 <div
                   key={it.id}
-                  className="flex items-start gap-2 px-4 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 group"
+                  className="flex items-start gap-2 px-4 py-2.5 border-b border-slate-50 dark:border-slate-800 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800 group"
                 >
                   {it.type === 'reminder' ? (
                     <Clock size={13} className="text-purple-500 flex-shrink-0 mt-0.5" />
@@ -5216,8 +5319,10 @@ function SavedScheduledPanel({
                     onClick={() => openRoom(it.roomToken)}
                     className="flex-1 min-w-0 text-left"
                   >
-                    <p className="text-xs text-slate-700 line-clamp-2">{it.text}</p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">
+                    <p className="text-xs text-slate-700 dark:text-slate-200 line-clamp-2">
+                      {it.text}
+                    </p>
+                    <p className="text-[10px] text-slate-400 dark:text-slate-400 mt-0.5">
                       {it.type === 'reminder' ? 'Lembrete' : 'Mensagem'}
                       {it.roomName ? ` · ${it.roomName}` : ''} ·{' '}
                       {format(new Date(it.fireAt), "dd/MM 'às' HH:mm")}
@@ -5226,7 +5331,7 @@ function SavedScheduledPanel({
                   <button
                     onClick={() => cancel(it.id)}
                     title="Cancelar"
-                    className="flex-shrink-0 p-0.5 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="flex-shrink-0 p-0.5 text-slate-300 dark:text-slate-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
                   >
                     <X size={13} />
                   </button>
@@ -5268,7 +5373,7 @@ function ConversationsPanel({
   return (
     <>
       <div
-        className="relative flex flex-col bg-white border border-slate-200 rounded-t-xl shadow-2xl overflow-hidden"
+        className="relative flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-t-xl shadow-2xl overflow-hidden"
         style={{ width: 300, height: 420 }}
       >
         {showNewConv && (
@@ -5287,9 +5392,11 @@ function ConversationsPanel({
             onClose={() => setShowSaved(false)}
           />
         )}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 flex-shrink-0 relative">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700 flex-shrink-0 relative">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-slate-800">Mensagens</span>
+            <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+              Mensagens
+            </span>
             <span title={isError ? 'Nextcloud inacessível' : 'Conectado'}>
               {isError ? (
                 <WifiOff size={12} className="text-red-400" />
@@ -5317,7 +5424,7 @@ function ConversationsPanel({
             {noteRoom && (
               <button
                 onClick={() => onSelect(noteRoom)}
-                className="relative p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-blue-600 transition-colors"
+                className="relative p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
                 title="Nota para si mesmo"
               >
                 <FileText size={14} />
@@ -5328,21 +5435,21 @@ function ConversationsPanel({
             )}
             <button
               onClick={() => setShowSaved(true)}
-              className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-blue-600 transition-colors"
+              className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
               title="Salvos e agendados"
             >
               <Bookmark size={14} />
             </button>
             <button
               onClick={() => setShowNewConv(true)}
-              className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-blue-600 transition-colors"
+              className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
               title="Nova conversa"
             >
               <Plus size={14} />
             </button>
             <button
               onClick={onClose}
-              className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-600 transition-colors"
+              className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
             >
               <X size={14} />
             </button>
@@ -5351,14 +5458,16 @@ function ConversationsPanel({
 
         <div className="flex-1 overflow-y-auto scrollbar-thin">
           {isLoading && (
-            <div className="flex items-center justify-center h-20 text-slate-400 text-xs">
+            <div className="flex items-center justify-center h-20 text-slate-400 dark:text-slate-400 text-xs">
               Carregando conversas…
             </div>
           )}
           {isError && !isLoading && (
             <div className="flex flex-col items-center justify-center h-20 gap-1">
               <WifiOff size={20} className="text-red-300" />
-              <span className="text-xs text-slate-400">Nextcloud inacessível</span>
+              <span className="text-xs text-slate-400 dark:text-slate-400">
+                Nextcloud inacessível
+              </span>
             </div>
           )}
           {sorted.map((room) => {
@@ -5370,8 +5479,8 @@ function ConversationsPanel({
               <button
                 key={room.token}
                 onClick={() => onSelect(room)}
-                className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 border-b border-slate-50 last:border-0 text-left transition-colors ${
-                  isOpen ? 'bg-blue-50' : ''
+                className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800 border-b border-slate-50 dark:border-slate-800 last:border-0 text-left transition-colors ${
+                  isOpen ? 'bg-blue-50 dark:bg-blue-950/40' : ''
                 }`}
               >
                 <div className="relative">
@@ -5387,19 +5496,19 @@ function ConversationsPanel({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-1">
                     <span
-                      className={`text-xs truncate ${room.unreadMessages > 0 || hasAlert ? 'font-semibold text-slate-900' : 'font-medium text-slate-700'}`}
+                      className={`text-xs truncate ${room.unreadMessages > 0 || hasAlert ? 'font-semibold text-slate-900 dark:text-slate-100' : 'font-medium text-slate-700 dark:text-slate-200'}`}
                     >
                       {room.displayName}
                     </span>
                     {room.lastActivity && (
-                      <span className="text-[10px] text-slate-400 flex-shrink-0">
+                      <span className="text-[10px] text-slate-400 dark:text-slate-400 flex-shrink-0">
                         {formatDistanceToNow(new Date(room.lastActivity * 1000), { locale: ptBR })}
                       </span>
                     )}
                   </div>
                   {lastText && (
                     <p
-                      className={`text-[11px] truncate mt-0.5 ${room.unreadMessages > 0 || hasAlert ? 'text-slate-600' : 'text-slate-400'}`}
+                      className={`text-[11px] truncate mt-0.5 ${room.unreadMessages > 0 || hasAlert ? 'text-slate-600 dark:text-slate-300' : 'text-slate-400 dark:text-slate-400'}`}
                     >
                       {lastName ? `${lastName}: ` : ''}
                       {lastText}
@@ -5443,12 +5552,49 @@ export function TalkChat({
     window.addEventListener(TALK_AUTH_EXPIRED_EVENT, onExpired);
     return () => window.removeEventListener(TALK_AUTH_EXPIRED_EVENT, onExpired);
   }, []);
+  const qc = useQueryClient();
   const { data: rooms = [] } = useTalkRooms();
   const { data: me } = useTalkCurrentUser();
   const myId = me?.id ?? auth?.user ?? '';
   const [panelOpen, setPanelOpen] = useState(false);
   const [openChats, setOpenChats] = useState<TalkRoom[]>([]);
   const [minimized, setMinimized] = useState<Set<string>>(new Set());
+
+  // Alertas de novas mensagens (aba sem foco)
+  const prevUnread = useRef<Map<string, number>>(new Map());
+  const [newAlerts, setNewAlerts] = useState<Set<string>>(new Set());
+
+  // Marca a sala como lida NA HORA em que é aberta (clique ou push), sem depender da
+  // janela montar e do efeito de markRead da ChatWindow rodar depois que as mensagens
+  // carregam — era isso que deixava a notificação "presa" ao clicar. Faz três coisas:
+  //  1) some com o ponto de alerta (newAlerts) e sincroniza o prevUnread p/ não re-alertar;
+  //  2) zera o badge otimisticamente (cancelQueries evita que um poll de /rooms em voo,
+  //     iniciado antes, sobrescreva o zero com a contagem antiga por dedupe do React Query);
+  //  3) dispara o /read no servidor com o id da última mensagem já disponível no listing —
+  //     assim o próximo poll de /rooms volta com 0 e o "não lido" não ressurge.
+  const markRoomRead = useCallback(
+    async (room: TalkRoom) => {
+      prevUnread.current.set(room.token, 0);
+      setNewAlerts((prev) => {
+        if (!prev.has(room.token)) return prev;
+        const s = new Set(prev);
+        s.delete(room.token);
+        return s;
+      });
+      await qc.cancelQueries({ queryKey: ['talk-rooms'] });
+      qc.setQueryData<TalkRoom[]>(['talk-rooms'], (old) =>
+        old?.map((r) =>
+          r.token === room.token ? { ...r, unreadMessages: 0, unreadMention: false } : r,
+        ),
+      );
+      const lastId = room.lastMessage?.id;
+      if (lastId) {
+        talkRead.set(room.token, lastId); // marcador local: sobrevive a poll/propagação lenta
+        markMessagesRead(room.token, lastId).catch(() => {});
+      }
+    },
+    [qc],
+  );
 
   // Registra uploader na bridge para IssueModal compartilhar anexos no Talk
   useEffect(() => {
@@ -5474,13 +5620,10 @@ export function TalkChat({
       s.delete(room.token);
       return s;
     });
+    markRoomRead(room);
     setPanelOpen(false);
     onRoomOpened?.();
-  }, [openRoomToken, rooms]);
-
-  // Alertas de novas mensagens (aba sem foco)
-  const prevUnread = useRef<Map<string, number>>(new Map());
-  const [newAlerts, setNewAlerts] = useState<Set<string>>(new Set());
+  }, [openRoomToken, rooms, markRoomRead, onRoomOpened]);
 
   useEffect(() => {
     rooms.forEach((room) => {
@@ -5520,11 +5663,7 @@ export function TalkChat({
       s.delete(room.token);
       return s;
     });
-    setNewAlerts((prev) => {
-      const s = new Set(prev);
-      s.delete(room.token);
-      return s;
-    });
+    markRoomRead(room);
     setPanelOpen(false);
   };
 
@@ -5563,7 +5702,7 @@ export function TalkChat({
           <div key={room.token} className="flex flex-col items-stretch">
             {minimized.has(room.token) ? (
               <div
-                className={`flex items-center gap-2 px-3 py-2 bg-white border border-b-0 border-slate-200 rounded-t-xl shadow-lg cursor-pointer hover:bg-slate-50 transition-colors ${
+                className={`flex items-center gap-2 px-3 py-2 bg-white dark:bg-slate-900 border border-b-0 border-slate-200 dark:border-slate-700 rounded-t-xl shadow-lg cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors ${
                   hasNewMsg ? 'ring-2 ring-blue-400' : ''
                 }`}
                 onClick={() => toggleMinimize(room.token)}
@@ -5576,7 +5715,7 @@ export function TalkChat({
                     <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-blue-500 rounded-full border border-white animate-pulse" />
                   )}
                 </div>
-                <span className="text-xs font-medium text-slate-700 truncate max-w-[140px]">
+                <span className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate max-w-[140px]">
                   {room.displayName}
                 </span>
                 <button
@@ -5584,7 +5723,7 @@ export function TalkChat({
                     e.stopPropagation();
                     closeChat(room.token);
                   }}
-                  className="p-0.5 hover:bg-slate-200 rounded text-slate-400 hover:text-slate-600 transition-colors"
+                  className="p-0.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
                 >
                   <X size={11} />
                 </button>
@@ -5642,10 +5781,12 @@ export function TalkChat({
         ) : (
           <button
             onClick={() => setPanelOpen((v) => !v)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-white border border-b-0 border-slate-200 rounded-t-xl shadow-lg hover:bg-slate-50 transition-colors"
+            className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-slate-900 border border-b-0 border-slate-200 dark:border-slate-700 rounded-t-xl shadow-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
           >
             <MessageSquare size={15} className="text-blue-600 flex-shrink-0" />
-            <span className="text-sm font-semibold text-slate-700">Mensagens</span>
+            <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+              Mensagens
+            </span>
             {(totalUnread > 0 || totalAlerts > 0) && (
               <span
                 className={`min-w-[18px] h-[18px] text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 ${

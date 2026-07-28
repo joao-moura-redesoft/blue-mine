@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Plus, Copy, Trash2, Check, ShieldCheck, KeyRound, Eye, EyeOff } from 'lucide-react';
 import { totpRemaining } from '../utils/totp';
 import { listTotp, addTotp, deleteTotp, type TotpEntry } from '../api/totp';
+import { ConfirmDialog } from './workflow/ConfirmDialog';
 
 // SVG countdown ring
 function CountdownRing({ remaining, total = 30 }: { remaining: number; total?: number }) {
@@ -175,6 +176,7 @@ export function TotpView() {
     setAdding(false);
   };
 
+  const [confirmDelete, setConfirmDelete] = useState<TotpEntry | null>(null);
   const remove = async (id: string) => {
     setAccounts((prev) => prev.filter((a) => a.id !== id));
     try {
@@ -292,10 +294,21 @@ export function TotpView() {
               key={acc.id}
               account={acc}
               remaining={remaining}
-              onDelete={() => remove(acc.id)}
+              onDelete={() => setConfirmDelete(acc)}
             />
           ))}
         </div>
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title={`Remover "${confirmDelete.name}"?`}
+          message="O código de verificação em duas etapas desta conta para de gerar. Você só consegue recuperar se tiver a semente original salva em outro lugar."
+          confirmLabel="Remover"
+          danger
+          onConfirm={() => remove(confirmDelete.id)}
+          onClose={() => setConfirmDelete(null)}
+        />
       )}
     </div>
   );

@@ -69,9 +69,9 @@ function StatCard({
       type="button"
       disabled={!clickable}
       onClick={() => onSelect(label, issues)}
-      className={`bg-white rounded-xl border border-slate-200 p-4 flex items-start gap-3 text-left w-full ${
+      className={`bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 flex items-start gap-3 text-left w-full ${
         clickable
-          ? 'hover:border-blue-300 hover:shadow-sm cursor-pointer transition-all'
+          ? 'hover:border-blue-300 dark:hover:border-blue-700 hover:shadow-sm cursor-pointer transition-all'
           : 'cursor-default'
       }`}
     >
@@ -81,8 +81,10 @@ function StatCard({
         {icon}
       </div>
       <div className="min-w-0">
-        <p className="text-2xl font-bold text-slate-800 leading-none">{issues.length}</p>
-        <p className="text-xs font-medium text-slate-500 mt-1">{label}</p>
+        <p className="text-2xl font-bold text-slate-800 dark:text-slate-100 leading-none">
+          {issues.length}
+        </p>
+        <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-1">{label}</p>
       </div>
     </button>
   );
@@ -116,16 +118,19 @@ function KpiModal({
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col"
+        className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200">
-          <h3 className="text-sm font-semibold text-slate-800">
-            {label} <span className="text-slate-400 font-normal">· {issues.length}</span>
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200 dark:border-slate-700">
+          <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+            {label}{' '}
+            <span className="text-slate-400 dark:text-slate-500 font-normal">
+              · {issues.length}
+            </span>
           </h3>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+            className="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700"
           >
             <X size={16} />
           </button>
@@ -140,22 +145,24 @@ function KpiModal({
                   onIssueClick(issue.id);
                   onClose();
                 }}
-                className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-blue-50 transition-colors group"
+                className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors group"
               >
-                <span className="text-xs font-medium text-slate-400 flex-shrink-0">
+                <span className="text-xs font-medium text-slate-400 dark:text-slate-500 flex-shrink-0">
                   #{issue.id}
                 </span>
-                <span className="text-sm text-slate-700 group-hover:text-blue-700 truncate flex-1">
+                <span className="text-sm text-slate-700 dark:text-slate-200 group-hover:text-blue-700 dark:group-hover:text-blue-400 truncate flex-1">
                   {issue.subject}
                 </span>
                 {issue.assigned_to && (
-                  <span className="text-[10px] text-slate-400 flex-shrink-0 max-w-28 truncate">
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 flex-shrink-0 max-w-28 truncate">
                     {issue.assigned_to.name}
                   </span>
                 )}
                 <span
                   className={`text-[10px] font-medium px-1.5 py-0.5 rounded flex-shrink-0 ${
-                    overdue ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'
+                    overdue
+                      ? 'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400'
+                      : 'bg-slate-100 text-slate-500 dark:bg-slate-700/50 dark:text-slate-300'
                   }`}
                 >
                   {issue.status.name}
@@ -222,11 +229,13 @@ function StandupModal({
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col"
+        className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200">
-          <h3 className="text-sm font-semibold text-slate-800">Resumo do dia</h3>
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200 dark:border-slate-700">
+          <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+            Resumo do dia
+          </h3>
           <div className="flex items-center gap-2">
             <button
               onClick={copy}
@@ -237,7 +246,7 @@ function StandupModal({
             </button>
             <button
               onClick={onClose}
-              className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+              className="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700"
             >
               <X size={16} />
             </button>
@@ -246,12 +255,14 @@ function StandupModal({
         <div className="overflow-y-auto scrollbar-thin p-4 space-y-4">
           {sections.map((s) => (
             <div key={s.title}>
-              <p className="text-xs font-semibold text-slate-700 mb-1.5">
+              <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1.5">
                 {s.emoji} {s.title}{' '}
-                <span className="text-slate-400 font-normal">· {s.list.length}</span>
+                <span className="text-slate-400 dark:text-slate-500 font-normal">
+                  · {s.list.length}
+                </span>
               </p>
               {s.list.length === 0 ? (
-                <p className="text-xs text-slate-400 pl-1">(nenhuma)</p>
+                <p className="text-xs text-slate-400 dark:text-slate-500 pl-1">(nenhuma)</p>
               ) : (
                 <div className="space-y-0.5">
                   {s.list.map((i) => (
@@ -261,12 +272,12 @@ function StandupModal({
                         onIssueClick(i.id);
                         onClose();
                       }}
-                      className="w-full text-left flex items-center gap-2 px-2 py-1 rounded hover:bg-blue-50 group"
+                      className="w-full text-left flex items-center gap-2 px-2 py-1 rounded hover:bg-blue-50 dark:hover:bg-blue-950/30 group"
                     >
-                      <span className="text-xs font-medium text-slate-400 flex-shrink-0">
+                      <span className="text-xs font-medium text-slate-400 dark:text-slate-500 flex-shrink-0">
                         #{i.id}
                       </span>
-                      <span className="text-xs text-slate-700 group-hover:text-blue-700 truncate">
+                      <span className="text-xs text-slate-700 dark:text-slate-200 group-hover:text-blue-700 dark:group-hover:text-blue-400 truncate">
                         {i.subject}
                       </span>
                     </button>
@@ -323,40 +334,64 @@ function TimeSummaryWidget() {
 
   if (isLoading)
     return (
-      <div className="bg-white rounded-xl border border-slate-200 p-5 flex items-center gap-2 text-slate-400 text-sm">
+      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 flex items-center gap-2 text-slate-400 dark:text-slate-500 text-sm">
         <Timer size={15} className="animate-pulse" /> Carregando horas…
       </div>
     );
   if (!stats) return null;
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5">
-      <h3 className="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">
-        <Timer size={15} className="text-blue-500" /> Horas apontadas
+    <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+      <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4 flex items-center gap-2">
+        <Timer size={15} className="text-blue-500 dark:text-blue-400" /> Horas apontadas
       </h3>
       <div className="grid grid-cols-3 gap-3 mb-5">
         {[
-          { label: 'Hoje', value: stats.todayH, color: 'text-blue-600 bg-blue-50' },
-          { label: 'Semana', value: stats.weekH, color: 'text-indigo-600 bg-indigo-50' },
-          { label: 'Mês', value: stats.monthH, color: 'text-violet-600 bg-violet-50' },
-        ].map(({ label, value, color }) => (
-          <div key={label} className={`rounded-lg px-3 py-2.5 ${color.split(' ')[1]}`}>
-            <p className={`text-xl font-bold ${color.split(' ')[0]}`}>{fmtH(value)}</p>
-            <p className="text-xs font-medium text-slate-500 mt-0.5">{label}</p>
-          </div>
-        ))}
+          {
+            label: 'Hoje',
+            value: stats.todayH,
+            color: 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-950/30',
+          },
+          {
+            label: 'Semana',
+            value: stats.weekH,
+            color: 'text-indigo-600 bg-indigo-50 dark:text-indigo-400 dark:bg-indigo-950/30',
+          },
+          {
+            label: 'Mês',
+            value: stats.monthH,
+            color: 'text-violet-600 bg-violet-50 dark:text-violet-400 dark:bg-violet-950/30',
+          },
+        ].map(({ label, value, color }) => {
+          const bgCls = color
+            .split(' ')
+            .filter((c) => c.includes('bg-'))
+            .join(' ');
+          const textCls = color
+            .split(' ')
+            .filter((c) => c.includes('text-'))
+            .join(' ');
+          return (
+            <div key={label} className={`rounded-lg px-3 py-2.5 ${bgCls}`}>
+              <p className={`text-xl font-bold ${textCls}`}>{fmtH(value)}</p>
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-0.5">
+                {label}
+              </p>
+            </div>
+          );
+        })}
       </div>
       {stats.topProjects.length > 0 && (
         <div className="space-y-2">
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">
+          <p className="text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wide mb-1">
             Por projeto
           </p>
           {stats.topProjects.map(([name, hours]) => (
             <div key={name} className="flex items-center gap-3">
-              <span className="text-xs text-slate-600 w-36 truncate flex-shrink-0 text-right">
+              <span className="text-xs text-slate-600 dark:text-slate-300 w-36 truncate flex-shrink-0 text-right">
                 {name}
               </span>
-              <div className="flex-1 h-4 bg-slate-100 rounded-full overflow-hidden">
+              <div className="flex-1 h-4 bg-slate-100 dark:bg-slate-700/50 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-blue-400 to-indigo-500 rounded-full flex items-center justify-end px-1.5"
                   style={{ width: `${Math.max((hours / stats.maxH) * 100, 10)}%` }}
@@ -369,7 +404,9 @@ function TimeSummaryWidget() {
         </div>
       )}
       {entries?.length === 0 && (
-        <p className="text-sm text-slate-400">Nenhuma hora apontada este mês.</p>
+        <p className="text-sm text-slate-400 dark:text-slate-500">
+          Nenhuma hora apontada este mês.
+        </p>
       )}
     </div>
   );
@@ -491,8 +528,10 @@ export function Dashboard({ onIssueClick }: Props) {
     return (
       <div className="max-w-6xl mx-auto space-y-6">
         <div>
-          <h2 className="text-lg font-semibold text-slate-800">Dashboard</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Visão geral das suas tarefas</p>
+          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Dashboard</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+            Visão geral das suas tarefas
+          </p>
         </div>
         <DashboardSkeleton />
       </div>
@@ -503,14 +542,16 @@ export function Dashboard({ onIssueClick }: Props) {
     <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold text-slate-800">Dashboard</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Visão geral das suas tarefas</p>
+          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Dashboard</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+            Visão geral das suas tarefas
+          </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {/* Resumo do dia (standup) */}
           <button
             onClick={() => setShowStandup(true)}
-            className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
+            className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
             title="Gera um resumo pronto para a daily"
           >
             <ClipboardList size={13} />
@@ -521,8 +562,8 @@ export function Dashboard({ onIssueClick }: Props) {
             onClick={() => setHideArchived((v) => !v)}
             className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${
               hideArchived
-                ? 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'
-                : 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100'
+                ? 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200 dark:bg-slate-700/50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700'
+                : 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 dark:bg-blue-950/30 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-900/40'
             }`}
             title="Inclui ou não as tarefas arquivadas localmente"
           >
@@ -536,13 +577,13 @@ export function Dashboard({ onIssueClick }: Props) {
 
       {/* Novidades de hoje */}
       {newToday.length > 0 ? (
-        <div className="rounded-xl border border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 p-4">
+        <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 p-4">
           <div className="flex items-center gap-2 mb-2.5">
-            <Sparkles size={16} className="text-blue-600" />
-            <h3 className="text-sm font-semibold text-blue-800">
+            <Sparkles size={16} className="text-blue-600 dark:text-blue-400" />
+            <h3 className="text-sm font-semibold text-blue-800 dark:text-blue-300">
               {newToday.length} novidade{newToday.length !== 1 ? 's' : ''} hoje
             </h3>
-            <span className="text-xs text-blue-500">
+            <span className="text-xs text-blue-500 dark:text-blue-400">
               — tarefas novas ou recém-atribuídas a você
             </span>
           </div>
@@ -551,27 +592,29 @@ export function Dashboard({ onIssueClick }: Props) {
               <button
                 key={issue.id}
                 onClick={() => onIssueClick(issue.id)}
-                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white/70 hover:bg-white border border-blue-100 transition-colors text-left group"
+                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white/70 hover:bg-white dark:bg-slate-800/70 dark:hover:bg-slate-800 border border-blue-100 dark:border-blue-900/40 transition-colors text-left group"
               >
-                <ArrowRight size={12} className="text-blue-400 flex-shrink-0" />
-                <span className="text-xs font-medium text-slate-400 flex-shrink-0">
+                <ArrowRight size={12} className="text-blue-400 dark:text-blue-500 flex-shrink-0" />
+                <span className="text-xs font-medium text-slate-400 dark:text-slate-500 flex-shrink-0">
                   #{issue.id}
                 </span>
-                <span className="text-xs text-slate-700 group-hover:text-blue-700 truncate flex-1">
+                <span className="text-xs text-slate-700 dark:text-slate-200 group-hover:text-blue-700 dark:group-hover:text-blue-400 truncate flex-1">
                   {issue.subject}
                 </span>
-                <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded flex-shrink-0">
+                <span className="text-[10px] font-medium text-slate-500 bg-slate-100 dark:text-slate-300 dark:bg-slate-700/50 px-1.5 py-0.5 rounded flex-shrink-0">
                   {issue.status.name}
                 </span>
               </button>
             ))}
           </div>
           {newToday.length > 6 && (
-            <p className="text-xs text-blue-500 mt-1.5">e mais {newToday.length - 6}…</p>
+            <p className="text-xs text-blue-500 dark:text-blue-400 mt-1.5">
+              e mais {newToday.length - 6}…
+            </p>
           )}
         </div>
       ) : (
-        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 flex items-center gap-2 text-slate-400">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 flex items-center gap-2 text-slate-400 dark:text-slate-500">
           <Sparkles size={15} />
           <span className="text-sm">Nenhuma tarefa nova hoje.</span>
         </div>
@@ -580,57 +623,57 @@ export function Dashboard({ onIssueClick }: Props) {
       {/* Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 gap-3">
         <StatCard
-          icon={<ListTodo size={18} className="text-blue-600" />}
-          color="bg-blue-50"
+          icon={<ListTodo size={18} className="text-blue-600 dark:text-blue-400" />}
+          color="bg-blue-50 dark:bg-blue-950/30"
           label="Tarefas abertas"
           issues={stats.openIssues}
           onSelect={showKpi}
         />
         <StatCard
-          icon={<PlayCircle size={18} className="text-cyan-600" />}
-          color="bg-cyan-50"
+          icon={<PlayCircle size={18} className="text-cyan-600 dark:text-cyan-400" />}
+          color="bg-cyan-50 dark:bg-cyan-950/30"
           label="Em andamento agora"
           issues={stats.emAndamento}
           onSelect={showKpi}
         />
         <StatCard
-          icon={<ClipboardCheck size={18} className="text-violet-600" />}
-          color="bg-violet-50"
+          icon={<ClipboardCheck size={18} className="text-violet-600 dark:text-violet-400" />}
+          color="bg-violet-50 dark:bg-violet-950/30"
           label="Para eu revisar"
           issues={toReview ?? []}
           onSelect={showKpi}
         />
         <StatCard
-          icon={<CheckCircle2 size={18} className="text-green-600" />}
-          color="bg-green-50"
+          icon={<CheckCircle2 size={18} className="text-green-600 dark:text-green-400" />}
+          color="bg-green-50 dark:bg-green-950/30"
           label="Concluídas na semana"
           issues={stats.completedThisWeek}
           onSelect={showKpi}
         />
         <StatCard
-          icon={<Flame size={18} className="text-rose-600" />}
-          color="bg-rose-50"
+          icon={<Flame size={18} className="text-rose-600 dark:text-rose-400" />}
+          color="bg-rose-50 dark:bg-rose-950/30"
           label="Paradas +30 dias"
           issues={stats.stale30}
           onSelect={showKpi}
         />
         <StatCard
-          icon={<AlertTriangle size={18} className="text-red-600" />}
-          color="bg-red-50"
+          icon={<AlertTriangle size={18} className="text-red-600 dark:text-red-400" />}
+          color="bg-red-50 dark:bg-red-950/30"
           label="Prazo vencido"
           issues={stats.overdue}
           onSelect={showKpi}
         />
         <StatCard
-          icon={<Bell size={18} className="text-orange-600" />}
-          color="bg-orange-50"
+          icon={<Bell size={18} className="text-orange-600 dark:text-orange-400" />}
+          color="bg-orange-50 dark:bg-orange-950/30"
           label="Revisão atrasada"
           issues={stats.reviewOverdue}
           onSelect={showKpi}
         />
         <StatCard
-          icon={<Clock size={18} className="text-amber-600" />}
-          color="bg-amber-50"
+          icon={<Clock size={18} className="text-amber-600 dark:text-amber-400" />}
+          color="bg-amber-50 dark:bg-amber-950/30"
           label="Campos faltando"
           issues={stats.missing}
           onSelect={showKpi}
@@ -642,20 +685,20 @@ export function Dashboard({ onIssueClick }: Props) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Distribuição por status */}
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
-          <h3 className="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4 flex items-center gap-2">
             <TrendingUp size={15} /> Distribuição por status
           </h3>
           {sortedStatus.length === 0 ? (
-            <p className="text-sm text-slate-400">Nenhuma tarefa aberta.</p>
+            <p className="text-sm text-slate-400 dark:text-slate-500">Nenhuma tarefa aberta.</p>
           ) : (
             <div className="space-y-2.5">
               {sortedStatus.map(([name, count]) => (
                 <div key={name} className="flex items-center gap-3">
-                  <span className="text-xs text-slate-600 w-40 truncate text-right flex-shrink-0">
+                  <span className="text-xs text-slate-600 dark:text-slate-300 w-40 truncate text-right flex-shrink-0">
                     {name}
                   </span>
-                  <div className="flex-1 h-5 bg-slate-100 rounded-full overflow-hidden">
+                  <div className="flex-1 h-5 bg-slate-100 dark:bg-slate-700/50 rounded-full overflow-hidden">
                     <div
                       className="h-full bg-gradient-to-r from-blue-400 to-blue-600 rounded-full flex items-center justify-end px-2"
                       style={{ width: `${Math.max((count / maxStatus) * 100, 8)}%` }}
@@ -670,20 +713,20 @@ export function Dashboard({ onIssueClick }: Props) {
         </div>
 
         {/* Distribuição por prioridade */}
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
-          <h3 className="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4 flex items-center gap-2">
             <Flag size={15} /> Por prioridade
           </h3>
           {sortedPriority.length === 0 ? (
-            <p className="text-sm text-slate-400">Nenhuma tarefa aberta.</p>
+            <p className="text-sm text-slate-400 dark:text-slate-500">Nenhuma tarefa aberta.</p>
           ) : (
             <div className="space-y-2.5">
               {sortedPriority.map(([name, count]) => (
                 <div key={name} className="flex items-center gap-3">
-                  <span className="text-xs text-slate-600 w-20 text-right flex-shrink-0">
+                  <span className="text-xs text-slate-600 dark:text-slate-300 w-20 text-right flex-shrink-0">
                     {name}
                   </span>
-                  <div className="flex-1 h-5 bg-slate-100 rounded-full overflow-hidden">
+                  <div className="flex-1 h-5 bg-slate-100 dark:bg-slate-700/50 rounded-full overflow-hidden">
                     <div
                       className={`h-full rounded-full flex items-center justify-end px-2 ${PRIORITY_BAR[name] ?? 'bg-slate-400'}`}
                       style={{ width: `${Math.max((count / totalPriority) * 100, 8)}%` }}
@@ -700,12 +743,12 @@ export function Dashboard({ onIssueClick }: Props) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Envelhecimento */}
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
-          <h3 className="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4 flex items-center gap-2">
             <Hourglass size={15} /> Envelhecimento das abertas
           </h3>
           {stats.openIssues.length === 0 ? (
-            <p className="text-sm text-slate-400">Nenhuma tarefa aberta.</p>
+            <p className="text-sm text-slate-400 dark:text-slate-500">Nenhuma tarefa aberta.</p>
           ) : (
             <>
               <div className="flex items-end justify-between gap-3 h-32">
@@ -717,7 +760,9 @@ export function Dashboard({ onIssueClick }: Props) {
                       key={b.label}
                       className="flex-1 flex flex-col items-center gap-2 h-full justify-end"
                     >
-                      <span className="text-xs font-bold text-slate-600">{b.count}</span>
+                      <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                        {b.count}
+                      </span>
                       <div
                         className={`w-full rounded-t transition-all ${old ? 'bg-gradient-to-t from-red-400 to-orange-400' : 'bg-gradient-to-t from-blue-400 to-blue-500'}`}
                         style={{
@@ -726,14 +771,14 @@ export function Dashboard({ onIssueClick }: Props) {
                         }}
                         title={`${b.count} tarefa(s) ${b.label}`}
                       />
-                      <span className="text-[10px] text-slate-400 whitespace-nowrap">
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap">
                         {b.label}
                       </span>
                     </div>
                   );
                 })}
               </div>
-              <p className="text-xs text-slate-400 mt-3">
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-3">
                 Vermelho/laranja = paradas há mais tempo.
               </p>
             </>
@@ -741,12 +786,13 @@ export function Dashboard({ onIssueClick }: Props) {
         </div>
 
         {/* Precisa de atenção */}
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
-          <h3 className="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">
-            <AlertTriangle size={15} className="text-amber-500" /> Precisa de atenção
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4 flex items-center gap-2">
+            <AlertTriangle size={15} className="text-amber-500 dark:text-amber-400" /> Precisa de
+            atenção
           </h3>
           {attention.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8 text-slate-400">
+            <div className="flex flex-col items-center justify-center py-8 text-slate-400 dark:text-slate-500">
               <CheckCircle2 size={28} className="mb-2 opacity-30" />
               <p className="text-sm">Tudo sob controle!</p>
             </div>
@@ -769,15 +815,17 @@ export function Dashboard({ onIssueClick }: Props) {
                   <button
                     key={issue.id}
                     onClick={() => onIssueClick(issue.id)}
-                    className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 transition-colors group"
+                    className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors group"
                   >
                     <span
                       className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${rev === 'overdue' ? 'bg-orange-500' : rev === 'today' ? 'bg-green-500' : 'bg-red-500'}`}
                     />
-                    <span className="text-xs text-slate-700 group-hover:text-blue-600 truncate flex-1">
+                    <span className="text-xs text-slate-700 dark:text-slate-200 group-hover:text-blue-600 dark:group-hover:text-blue-400 truncate flex-1">
                       #{issue.id} — {issue.subject}
                     </span>
-                    <span className="text-[10px] text-slate-400 flex-shrink-0">{tag}</span>
+                    <span className="text-[10px] text-slate-400 dark:text-slate-500 flex-shrink-0">
+                      {tag}
+                    </span>
                   </button>
                 );
               })}

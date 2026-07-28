@@ -191,37 +191,41 @@ export function CreateIssueModal({
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-xl shadow-2xl w-full max-w-lg"
+        className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl w-full max-w-lg"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between p-5 border-b border-slate-200">
-          <h2 className="text-base font-semibold text-slate-900">Nova Tarefa</h2>
+        <div className="flex items-center justify-between p-5 border-b border-slate-200 dark:border-slate-700">
+          <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+            Nova Tarefa
+          </h2>
           <button
             onClick={onClose}
-            className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
+            className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
           >
-            <X size={18} className="text-slate-500" />
+            <X size={18} className="text-slate-500 dark:text-slate-400" />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="block text-xs font-medium text-slate-700">Título *</label>
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-200">
+                Título *
+              </label>
               <div className="flex items-center gap-2">
                 {/* Templates */}
                 <div className="relative">
                   <button
                     type="button"
                     onClick={() => setShowTemplates((v) => !v)}
-                    className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 transition-colors"
+                    className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
                     title="Templates"
                   >
                     <BookTemplate size={11} /> Templates
                   </button>
                   {showTemplates && (
-                    <div className="absolute right-0 top-full mt-1 w-64 bg-white border border-slate-200 rounded-xl shadow-xl z-20 overflow-hidden">
-                      <div className="px-3 py-2 border-b border-slate-100 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                    <div className="absolute right-0 top-full mt-1 w-64 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-20 overflow-hidden">
+                      <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-700 text-[10px] font-bold uppercase tracking-wide text-slate-400">
                         Templates salvos
                       </div>
                       {templates.length === 0 && (
@@ -230,7 +234,7 @@ export function CreateIssueModal({
                       {templates.map((t) => (
                         <div
                           key={t.id}
-                          className="flex items-center gap-1 px-2 py-1.5 hover:bg-slate-50 group"
+                          className="flex items-center gap-1 px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700/50 group"
                         >
                           <button
                             type="button"
@@ -241,7 +245,7 @@ export function CreateIssueModal({
                               if (t.priority_id) setPriorityId(t.priority_id);
                               setShowTemplates(false);
                             }}
-                            className="flex-1 text-left text-xs text-slate-700 truncate"
+                            className="flex-1 text-left text-xs text-slate-700 dark:text-slate-200 truncate"
                           >
                             {t.name}
                           </button>
@@ -251,13 +255,13 @@ export function CreateIssueModal({
                               deleteTemplate(t.id);
                               setTemplates(getTemplates());
                             }}
-                            className="p-0.5 rounded text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100"
+                            className="p-0.5 rounded text-slate-300 dark:text-slate-600 hover:text-red-500 dark:hover:text-red-400 opacity-0 group-hover:opacity-100"
                           >
                             <Trash2 size={11} />
                           </button>
                         </div>
                       ))}
-                      <div className="border-t border-slate-100 px-2 py-2">
+                      <div className="border-t border-slate-100 dark:border-slate-700 px-2 py-2">
                         {savingTemplate ? (
                           <div className="flex gap-1">
                             <input
@@ -282,7 +286,7 @@ export function CreateIssueModal({
                                 if (e.key === 'Escape') setSavingTemplate(false);
                               }}
                               placeholder="Nome do template…"
-                              className="flex-1 text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                              className="flex-1 text-xs border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-400"
                             />
                             <button
                               type="button"
@@ -309,7 +313,7 @@ export function CreateIssueModal({
                           <button
                             type="button"
                             onClick={() => setSavingTemplate(true)}
-                            className="w-full flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 py-0.5"
+                            className="w-full flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 py-0.5"
                           >
                             <Save size={11} /> Salvar campos atuais como template
                           </button>
@@ -324,7 +328,7 @@ export function CreateIssueModal({
                     onClick={handleAISuggest}
                     disabled={!subject.trim() || aiSuggesting}
                     title="Sugerir tracker e prioridade com IA"
-                    className="flex items-center gap-1 text-xs text-purple-600 hover:text-purple-800 disabled:opacity-40 transition-colors"
+                    className="flex items-center gap-1 text-xs text-purple-600 dark:text-purple-400 hover:text-purple-800 dark:hover:text-purple-300 disabled:opacity-40 transition-colors"
                   >
                     {aiSuggesting ? (
                       <Loader2 size={11} className="animate-spin" />
@@ -347,13 +351,15 @@ export function CreateIssueModal({
               placeholder="Descreva brevemente a tarefa..."
               required
               autoFocus
-              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full text-sm border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Projeto *</label>
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-200 mb-1">
+                Projeto *
+              </label>
               <select
                 value={projectId}
                 onChange={(e) => {
@@ -362,7 +368,7 @@ export function CreateIssueModal({
                   setError(null);
                 }}
                 required
-                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                className="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800"
               >
                 <option value="">Selecionar...</option>
                 {projects?.map((p) => (
@@ -374,11 +380,13 @@ export function CreateIssueModal({
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Tracker</label>
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-200 mb-1">
+                Tracker
+              </label>
               <select
                 value={trackerId}
                 onChange={(e) => setTrackerId(e.target.value ? Number(e.target.value) : '')}
-                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                className="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800"
               >
                 <option value="">Padrão</option>
                 {trackers?.map((t) => (
@@ -390,11 +398,13 @@ export function CreateIssueModal({
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Prioridade</label>
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-200 mb-1">
+                Prioridade
+              </label>
               <select
                 value={priorityId}
                 onChange={(e) => setPriorityId(e.target.value ? Number(e.target.value) : '')}
-                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                className="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800"
               >
                 <option value="">Padrão</option>
                 {priorities?.map((p) => (
@@ -406,24 +416,26 @@ export function CreateIssueModal({
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Prazo</label>
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-200 mb-1">
+                Prazo
+              </label>
               <input
                 type="date"
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
-                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full text-sm border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
           </div>
 
           {aiReasoning && (
-            <div className="flex items-start gap-2 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2 text-xs text-purple-700">
+            <div className="flex items-start gap-2 bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-lg px-3 py-2 text-xs text-purple-700 dark:text-purple-300">
               <Sparkles size={12} className="mt-0.5 flex-shrink-0" />
               <span>{aiReasoning}</span>
               <button
                 type="button"
                 onClick={() => setAiReasoning(null)}
-                className="ml-auto text-purple-400 hover:text-purple-600 flex-shrink-0"
+                className="ml-auto text-purple-400 dark:text-purple-500 hover:text-purple-600 dark:hover:text-purple-400 flex-shrink-0"
               >
                 <X size={12} />
               </button>
@@ -431,12 +443,14 @@ export function CreateIssueModal({
           )}
 
           <div>
-            <label className="block text-xs font-medium text-slate-700 mb-1">Atribuído para</label>
+            <label className="block text-xs font-medium text-slate-700 dark:text-slate-200 mb-1">
+              Atribuído para
+            </label>
             <select
               value={assignedTo}
               onChange={(e) => setAssignedTo(e.target.value ? Number(e.target.value) : '')}
               disabled={!projectId}
-              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <option value="">{projectId ? 'Ninguém' : 'Selecione um projeto primeiro'}</option>
               {members?.map((m) => (
@@ -450,11 +464,13 @@ export function CreateIssueModal({
 
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="block text-xs font-medium text-slate-700">Descrição</label>
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-200">
+                Descrição
+              </label>
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
-                className="flex items-center gap-1 text-xs text-slate-500 hover:text-blue-600"
+                className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400"
               >
                 <Paperclip size={13} /> Anexar
               </button>
@@ -479,14 +495,14 @@ export function CreateIssueModal({
               }}
               placeholder="Detalhes opcionais… (arraste ou cole imagens para anexar)"
               rows={3}
-              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              className="w-full text-sm border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
             />
             {files.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-2">
                 {files.map((f, i) => (
                   <span
                     key={i}
-                    className="inline-flex items-center gap-1.5 text-xs bg-slate-100 text-slate-600 rounded-md pl-2 pr-1 py-1"
+                    className="inline-flex items-center gap-1.5 text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-md pl-2 pr-1 py-1"
                   >
                     {f.type.startsWith('image/') ? (
                       <ImageIcon size={12} />
@@ -498,7 +514,7 @@ export function CreateIssueModal({
                     <button
                       type="button"
                       onClick={() => removeFile(i)}
-                      className="text-slate-400 hover:text-red-500 ml-0.5"
+                      className="text-slate-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 ml-0.5"
                     >
                       <X size={12} />
                     </button>
@@ -519,19 +535,19 @@ export function CreateIssueModal({
           </div>
 
           {error && !forceCreate && (
-            <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5 text-sm text-red-700">
+            <div className="flex items-start gap-2 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2.5 text-sm text-red-700 dark:text-red-300">
               <AlertCircle size={15} className="mt-0.5 flex-shrink-0" />
               <p className="whitespace-pre-line">{error}</p>
             </div>
           )}
 
           {forceCreate && (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2.5">
-              <p className="text-xs font-semibold text-amber-800 flex items-center gap-1.5">
+            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3 space-y-2.5">
+              <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
                 <AlertCircle size={13} />
                 Sem permissão direta neste projeto.
               </p>
-              <p className="text-xs text-amber-700">
+              <p className="text-xs text-amber-700 dark:text-amber-400">
                 Selecione um projeto intermediário onde você tem permissão de criação. A tarefa será
                 criada lá e movida automaticamente para o projeto desejado.
               </p>
@@ -540,7 +556,7 @@ export function CreateIssueModal({
                 onChange={(e) =>
                   setIntermediateProjectId(e.target.value ? Number(e.target.value) : '')
                 }
-                className="w-full text-sm border border-amber-300 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"
+                className="w-full text-sm border border-amber-300 dark:border-amber-700 rounded-lg px-2.5 py-1.5 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-400"
               >
                 <option value="">Selecionar projeto intermediário…</option>
                 {projects
@@ -558,7 +574,7 @@ export function CreateIssueModal({
                     setForceCreate(false);
                     setError(null);
                   }}
-                  className="flex-1 px-3 py-1.5 text-xs text-amber-700 hover:bg-amber-100 rounded-lg transition-colors border border-amber-200"
+                  className="flex-1 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30 rounded-lg transition-colors border border-amber-200 dark:border-amber-700"
                 >
                   Cancelar
                 </button>
@@ -584,7 +600,7 @@ export function CreateIssueModal({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
+              className="px-4 py-2 text-sm text-slate-600 dark:text-slate-300 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
             >
               Cancelar
             </button>

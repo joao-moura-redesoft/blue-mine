@@ -74,6 +74,10 @@ export interface WorkflowRunAction {
   error?: string;
   /** true quando a falha interrompeu o ramo (config `onError: 'stop'`). */
   stopped?: boolean;
+  /** Presentes só na ação `notify`: conteúdo enviado (independente do push ter funcionado). */
+  title?: string;
+  body?: string;
+  issueId?: number;
 }
 
 export interface WorkflowRun {
@@ -119,5 +123,30 @@ export async function previewWorkflow(id: string): Promise<PreviewResult> {
 
 export async function fetchWorkflowRuns(id: string): Promise<WorkflowRun[]> {
   const { data } = await api.get<WorkflowRun[]>(`/workflows/${id}/runs`);
+  return data;
+}
+
+// ---------------------------------------------------------------------------
+// Disparos da ação "Notificar (push)", de todas as automações — alimenta o
+// sino do app (in-app), independente do Web Push ter uma inscrição ativa.
+// ---------------------------------------------------------------------------
+export interface WorkflowNotifyEvent {
+  id: string;
+  workflowId: string;
+  workflowName: string;
+  title: string;
+  body: string;
+  issueId?: number;
+  at: number;
+}
+
+export async function fetchWorkflowNotifications(): Promise<WorkflowNotifyEvent[]> {
+  // Sem cache-busting, um GET repetido nessa mesma URL (ex.: o refetch logo após
+  // um "Testar") pode ser servido do cache HTTP do navegador em vez de ir à rede
+  // — o Express não manda `Cache-Control: no-store`, então uma resposta idêntica
+  // recente é reaproveitada silenciosamente, e o evento novo nunca chega ao cliente.
+  const { data } = await api.get<WorkflowNotifyEvent[]>('/workflows/notifications', {
+    params: { _: Date.now() },
+  });
   return data;
 }

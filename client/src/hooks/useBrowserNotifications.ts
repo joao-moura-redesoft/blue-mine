@@ -58,27 +58,40 @@ export function useBrowserNotifications() {
       tag,
     };
 
-    // Prefer SW-backed notifications (enables notificationclick in sw.ts)
+    // Notificação direta (aba comum): sem notificationclick do SW, mas SEMPRE aparece.
+    const direct = () => {
+      try {
+        const n = new Notification(title, options);
+        n.onclick = () => {
+          window.focus();
+          n.close();
+        };
+      } catch {
+        // Notification() pode lançar em alguns contextos (ex.: exige SW). Ignora.
+      }
+    };
+
+    // Preferimos o SW (habilita notificationclick p/ focar/reabrir a janela). PORÉM
+    // navigator.serviceWorker.ready NUNCA rejeita — se nenhum SW ativa (ex.: o dev-sw
+    // do Vite que falha ao avaliar, ou o SW ainda instalando), a promise fica PENDENTE
+    // para sempre e a notificação jamais apareceria (o .catch tampouco dispara). Por isso
+    // corremos contra um timeout curto e caímos na API direta se o SW não ficar pronto.
     if ('serviceWorker' in navigator) {
+      let done = false;
+      const settle = (fn: () => void) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        fn();
+      };
+      const timer = setTimeout(() => settle(direct), 800);
       navigator.serviceWorker.ready
-        .then((reg) => reg.showNotification(title, options))
-        .catch(() => {
-          // SW not ready — fallback to direct API
-          const n = new Notification(title, options);
-          n.onclick = () => {
-            window.focus();
-            n.close();
-          };
-        });
+        .then((reg) => settle(() => void reg.showNotification(title, options)))
+        .catch(() => settle(direct));
       return;
     }
 
-    // No SW support — direct Notification API
-    const n = new Notification(title, options);
-    n.onclick = () => {
-      window.focus();
-      n.close();
-    };
+    direct();
   }, []);
 
   return { permission, requestPermission, notify };

@@ -71,6 +71,7 @@ export interface TalkMessage {
   _status?: 'sending' | 'failed';
   _clientText?: string;
   _clientReplyTo?: number;
+  _attachmentRemoved?: boolean;
 }
 
 export interface TalkParticipant {
@@ -120,7 +121,11 @@ api.interceptors.response.use(
 
 export async function fetchRooms(): Promise<TalkRoom[]> {
   const { data } = await api.get<TalkRoom[]>('/rooms');
-  return data;
+  // O OCS do Talk normalmente devolve um array, mas em alguns estados (erro OCS,
+  // vazio, resposta transitória) vem objeto/null. Sem essa coerção, o `rooms.reduce`
+  // no TalkChat quebra a app inteira (tela branca), pois o `= []` do useQuery só cobre
+  // `undefined`.
+  return Array.isArray(data) ? data : [];
 }
 
 export async function fetchMessages(
@@ -153,6 +158,16 @@ export async function editMessage(
 
 export async function deleteMessage(token: string, messageId: number): Promise<void> {
   await api.delete(`/rooms/${token}/messages/${messageId}`);
+}
+
+// Mensagens de arquivo/imagem chegam como systemMessage e não podem ser excluídas via
+// deleteMessage (Talk responde 405) — isso remove o arquivo real no Nextcloud.
+export async function deleteMessageAttachment(
+  token: string,
+  messageId: number,
+  path: string,
+): Promise<void> {
+  await api.delete(`/rooms/${token}/messages/${messageId}/attachment`, { params: { path } });
 }
 
 export async function fetchParticipants(token: string): Promise<TalkParticipant[]> {
@@ -346,6 +361,25 @@ export async function pollLoginFlow(
 
 export async function searchNCUsers(search: string): Promise<NCUser[]> {
   const { data } = await api.get<NCUser[]>('/search/users', { params: { search } });
+  return data;
+}
+
+// ─── Assimilação Redmine ↔ Talk por nome ────────────────────────────────────
+
+export interface RedmineTalkMatch {
+  ncUid?: string;
+  ncName?: string;
+  matchType: 'exact' | 'fuzzy' | 'ambiguous';
+  candidates?: { ncUid: string; ncName: string }[];
+}
+
+export interface RedmineTalkMatchMap {
+  updatedAt: number;
+  byRedmineId: Record<string, RedmineTalkMatch>;
+}
+
+export async function fetchRedmineTalkMatch(): Promise<RedmineTalkMatchMap> {
+  const { data } = await api.get<RedmineTalkMatchMap>('/redmine-match');
   return data;
 }
 

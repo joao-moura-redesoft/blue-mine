@@ -177,9 +177,13 @@ function unsubscribe(req) {
 }
 
 // Envia uma notificação; remove a inscrição se o navegador disser que expirou (404/410).
+// Retorna true se entregou, false se falhou (inscrição morta OU erro transitório).
+// Os fanouts (digest/workflow) ignoram o retorno — um device morto não deve falhar
+// o lote —, mas o scheduler usa isso para decidir se RETENTA um lembrete perdido.
 async function sendPush(rec, payload) {
   try {
     await webpush.sendNotification(rec.subscription, JSON.stringify(payload));
+    return true;
   } catch (err) {
     if (err.statusCode === 404 || err.statusCode === 410) {
       subscriptions = subscriptions.filter((s) => s.endpoint !== rec.endpoint);
@@ -188,6 +192,7 @@ async function sendPush(rec, payload) {
     } else {
       console.error('[push] erro ao enviar:', err.statusCode || err.message);
     }
+    return false;
   }
 }
 
@@ -426,7 +431,12 @@ const DIGEST_HOUR = Number.isFinite(Number(process.env.DIGEST_HOUR))
   ? Number(process.env.DIGEST_HOUR)
   : 8;
 const DIGEST_MIN = Number(process.env.DIGEST_MINUTE) || 0;
-const ymd = (d) => d.toISOString().slice(0, 10);
+// Data LOCAL (não UTC). O portão de horário abaixo usa now.getHours() (local);
+// se ymd usasse UTC, em fuso negativo (ex.: BRT/UTC-3) a data virava à meia-noite
+// UTC (21h local) e o MESMO digest era reenviado no mesmo dia (duplicado às ~21h).
+// Local mantém o gate de horário e o marcador digestDate no mesmo fuso.
+const ymd = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 let digestRunning = false;
 
 async function runDigests() {

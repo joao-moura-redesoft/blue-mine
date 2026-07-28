@@ -32,11 +32,14 @@ import { migrateLegacyTotp } from './api/totp';
 import { refreshSecretsStatus, resetSecretsStatus } from './utils/secretsStatus';
 import { useActivityNotifications } from './hooks/useActivityNotifications';
 import { useMailNotifications } from './hooks/useMailNotifications';
+import { useWorkflowNotifications } from './hooks/useWorkflowNotifications';
+import { fetchWorkflowNotifications } from './api/workflows';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { useSnoozeReminders } from './hooks/useSnoozeReminders';
 import { useWaitingReminders } from './hooks/useWaitingReminders';
 import { useBrowserNotifications } from './hooks/useBrowserNotifications';
 import { useTalkNotifications } from './hooks/useTalkNotifications';
+import { useCreateRoom } from './hooks/useTalk';
 import { useTheme } from './hooks/useTheme';
 import { useShortcuts } from './hooks/useShortcuts';
 import { SettingsModal } from './components/SettingsModal';
@@ -331,6 +334,13 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
     refetchInterval: 2 * 60_000,
     refetchIntervalInBackground: true,
   });
+  const workflowNotifyEvents = useQuery({
+    queryKey: ['workflows', 'notifications'],
+    queryFn: fetchWorkflowNotifications,
+    enabled: !!getStoredAuth(),
+    refetchInterval: 20_000,
+    refetchIntervalInBackground: true,
+  });
 
   const inboxCount =
     (toReview.data?.length ?? 0) +
@@ -354,15 +364,22 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
     mentions.data,
   );
   const mailNotifs = useMailNotifications(mailUnread.data);
+  const workflowNotifs = useWorkflowNotifications(workflowNotifyEvents.data);
 
-  const notifications = [...mailNotifs.notifications, ...activity.notifications];
+  const notifications = [
+    ...mailNotifs.notifications,
+    ...activity.notifications,
+    ...workflowNotifs.notifications,
+  ];
   const dismiss = (id: string) => {
     activity.dismiss(id);
     mailNotifs.dismiss(id);
+    workflowNotifs.dismiss(id);
   };
   const dismissAll = () => {
     activity.dismissAll();
     mailNotifs.dismissAll();
+    workflowNotifs.dismissAll();
   };
 
   const { permission: notifPermission, requestPermission } = useBrowserNotifications();
@@ -414,6 +431,27 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   useWaitingReminders(allIssues);
 
   const [pendingTalkToken, setPendingTalkToken] = useState<string | null>(null);
+  const [openingTalkFor, setOpeningTalkFor] = useState<string | null>(null);
+  const createTalkRoom = useCreateRoom();
+
+  // Abre (ou cria) a conversa 1:1 com um usuário do Talk já resolvido por
+  // useTalkMatchFor — usado pelo TalkContactButton no PeopleView/IssueModal.
+  const openTalkWithUser = async (ncUid: string) => {
+    setOpeningTalkFor(ncUid);
+    try {
+      const room = await createTalkRoom.mutateAsync({ roomType: 1, invite: ncUid });
+      setPendingTalkToken(room.token);
+    } catch (e) {
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      alert(
+        status === 403
+          ? 'Não foi possível iniciar essa conversa — o Nextcloud não permite essa conta iniciar contato com essa pessoa (restrição de grupo/visibilidade).'
+          : 'Não foi possível iniciar a conversa no Talk.',
+      );
+    } finally {
+      setOpeningTalkFor(null);
+    }
+  };
 
   useEffect(() => {
     // talkRoom é um deep-link one-shot: consome e limpa só esse param, preservando a rota/?issue=.
@@ -871,7 +909,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
                         className="flex items-start gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800 border-b border-slate-50 dark:border-slate-800 last:border-0 group"
                       >
                         <span
-                          className={`mt-1 flex-shrink-0 ${n.type === 'assigned' ? 'text-blue-500' : n.type === 'review' ? 'text-violet-500' : n.type === 'mention' ? 'text-pink-500' : n.type === 'mail' ? 'text-teal-500' : 'text-purple-500'}`}
+                          className={`mt-1 flex-shrink-0 ${n.type === 'assigned' ? 'text-blue-500' : n.type === 'review' ? 'text-violet-500' : n.type === 'mention' ? 'text-pink-500' : n.type === 'mail' ? 'text-teal-500' : n.type === 'workflow' ? 'text-amber-500' : 'text-purple-500'}`}
                         >
                           {n.type === 'assigned' ? (
                             <LayoutGrid size={14} />
@@ -881,6 +919,8 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
                             <AtSign size={14} />
                           ) : n.type === 'mail' ? (
                             <Mail size={14} />
+                          ) : n.type === 'workflow' ? (
+                            <Zap size={14} />
                           ) : (
                             <Bell size={14} />
                           )}
@@ -907,7 +947,9 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
                                     ? `Menção${n.author ? ` de ${n.author}` : ''}`
                                     : n.type === 'mail'
                                       ? 'Novo e-mail'
-                                      : 'Nova atividade'}
+                                      : n.type === 'workflow'
+                                        ? `Automação${n.author ? ` · ${n.author}` : ''}`
+                                        : 'Nova atividade'}
                             </p>
                             {n.issue && (
                               <p className="text-xs font-semibold text-blue-600 hover:underline truncate mt-0.5">
@@ -916,7 +958,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
                             )}
                             {n.snippet && (
                               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">
-                                {n.type === 'mail' ? n.snippet : `"${n.snippet}"`}
+                                {n.type === 'mail' || n.type === 'workflow' ? n.snippet : `"${n.snippet}"`}
                               </p>
                             )}
                             <p className="text-xs text-slate-400 mt-0.5">
@@ -960,7 +1002,16 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
               element={<ProjectView projectId={selectedProject} onIssueClick={openIssue} />}
             />
             <Route path="/myday" element={<MyDayView onIssueClick={openIssue} />} />
-            <Route path="/people" element={<PeopleView onIssueClick={openIssue} />} />
+            <Route
+              path="/people"
+              element={
+                <PeopleView
+                  onIssueClick={openIssue}
+                  onOpenTalk={openTalkWithUser}
+                  openingTalkFor={openingTalkFor}
+                />
+              }
+            />
             <Route path="/team" element={<TeamView onIssueClick={openIssue} />} />
             <Route path="/release" element={<ReleaseView onIssueClick={openIssue} />} />
             <Route path="/meetings" element={<MeetingsView onIssueClick={openIssue} />} />
@@ -1166,6 +1217,8 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
             openNewNote(patch);
           }}
           onViewNotes={openTaskNotes}
+          onOpenTalk={openTalkWithUser}
+          openingTalkFor={openingTalkFor}
         />
       )}
 

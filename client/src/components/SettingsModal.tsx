@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { ConfirmDialog } from './workflow/ConfirmDialog';
 import {
   X,
   KeyRound,
@@ -203,6 +204,7 @@ function ProviderSection({ config, active }: { config: ProviderConfig; active: b
     }
   };
 
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const remove = async () => {
     setBusy(true);
     try {
@@ -258,13 +260,23 @@ function ProviderSection({ config, active }: { config: ProviderConfig; active: b
                 <span>Chave salva no servidor</span>
               </div>
               <button
-                onClick={remove}
+                onClick={() => setConfirmRemove(true)}
                 disabled={busy}
                 className="flex items-center gap-1 text-xs text-red-400 hover:text-red-600 dark:hover:text-red-300 disabled:opacity-40 transition-colors"
               >
                 <Trash2 size={11} />
                 Remover
               </button>
+              {confirmRemove && (
+                <ConfirmDialog
+                  title={`Remover chave da ${config.name}?`}
+                  message="Recursos de IA que usam este provedor param de funcionar até uma nova chave ser configurada."
+                  confirmLabel="Remover"
+                  danger
+                  onConfirm={remove}
+                  onClose={() => setConfirmRemove(false)}
+                />
+              )}
             </div>
           ) : (
             <>
@@ -425,6 +437,7 @@ function NextcloudSection() {
     }
   };
 
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const remove = () => {
     clearTalkAuth();
     setCurrentAuth(null);
@@ -464,11 +477,21 @@ function NextcloudSection() {
                   </span>
                 </div>
                 <button
-                  onClick={remove}
+                  onClick={() => setConfirmRemove(true)}
                   className="flex items-center gap-1 text-xs text-red-400 hover:text-red-600 transition-colors"
                 >
                   <Trash2 size={11} /> Remover
                 </button>
+                {confirmRemove && (
+                  <ConfirmDialog
+                    title="Desvincular Nextcloud Talk?"
+                    message="O chat interno para de funcionar até reconectar. Conversas no servidor não são apagadas."
+                    confirmLabel="Desvincular"
+                    danger
+                    onConfirm={remove}
+                    onClose={() => setConfirmRemove(false)}
+                  />
+                )}
               </div>
 
               <div className="space-y-2 pt-1">
@@ -672,6 +695,7 @@ function ADCredsSection() {
     }
   };
 
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const remove = async () => {
     setBusy(true);
     try {
@@ -734,12 +758,22 @@ function ADCredsSection() {
                 <span>Credenciais AD salvas no servidor</span>
               </div>
               <button
-                onClick={remove}
+                onClick={() => setConfirmRemove(true)}
                 disabled={busy}
                 className="flex items-center gap-1 text-xs text-red-400 hover:text-red-600 disabled:opacity-40 transition-colors"
               >
                 <Trash2 size={11} /> Remover
               </button>
+              {confirmRemove && (
+                <ConfirmDialog
+                  title="Remover credenciais do AD?"
+                  message="E-mail e Wiki param de funcionar até novas credenciais serem configuradas."
+                  confirmLabel="Remover"
+                  danger
+                  onConfirm={remove}
+                  onClose={() => setConfirmRemove(false)}
+                />
+              )}
             </div>
           ) : (
             <>

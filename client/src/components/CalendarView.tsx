@@ -90,7 +90,7 @@ const PRIORITY_DOT: Record<string, string> = {
   Urgente: 'bg-orange-500',
   Alta: 'bg-amber-500',
   Normal: 'bg-blue-400',
-  Baixa: 'bg-slate-300',
+  Baixa: 'bg-slate-300 dark:bg-slate-600',
 };
 
 const PRIORITY_ORDER: Record<string, number> = {
@@ -213,7 +213,7 @@ function IssueChip({
           <span className="font-medium text-slate-400 dark:text-slate-500">#{issue.id}</span>
           <span className="flex-1" />
           <span
-            className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${closed ? 'bg-slate-300' : (PRIORITY_DOT[issue.priority.name] ?? 'bg-slate-300')}`}
+            className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${closed ? 'bg-slate-300 dark:bg-slate-600' : (PRIORITY_DOT[issue.priority.name] ?? 'bg-slate-300 dark:bg-slate-600')}`}
             title={issue.priority.name}
           />
         </div>
@@ -258,11 +258,11 @@ function IssueChip({
         />
       )}
       <span
-        className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${closed ? 'bg-slate-300' : (PRIORITY_DOT[issue.priority.name] ?? 'bg-slate-300')}`}
+        className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${closed ? 'bg-slate-300 dark:bg-slate-600' : (PRIORITY_DOT[issue.priority.name] ?? 'bg-slate-300 dark:bg-slate-600')}`}
       />
       {showAssignee && issue.assigned_to && (
         <span
-          className="w-4 h-4 rounded-full bg-slate-200 text-slate-600 text-[8px] font-bold flex items-center justify-center flex-shrink-0"
+          className="w-4 h-4 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-200 text-[8px] font-bold flex items-center justify-center flex-shrink-0"
           title={issue.assigned_to.name}
         >
           {initials(issue.assigned_to.name)}
@@ -558,7 +558,7 @@ function EventChip({ ev, weekMode = false }: { ev: CalendarEvent; weekMode?: boo
               </p>
               <button
                 onClick={() => setOpen(false)}
-                className="text-slate-300 hover:text-slate-500 flex-shrink-0"
+                className="text-slate-300 dark:text-slate-600 hover:text-slate-500 dark:hover:text-slate-400 flex-shrink-0"
               >
                 <X size={13} />
               </button>
@@ -577,13 +577,13 @@ function EventChip({ ev, weekMode = false }: { ev: CalendarEvent; weekMode?: boo
                   <User size={11} /> {ev.organizer.name}
                 </p>
               )}
-              {canceled && <p className="text-red-500 font-medium">Cancelado</p>}
+              {canceled && <p className="text-red-500 dark:text-red-400 font-medium">Cancelado</p>}
             </div>
 
             {/* Participantes e a resposta de cada um (buscado sob demanda) — só Zimbra */}
             {!ev.local && (
               <div className="mt-2.5 pt-2.5 border-t border-slate-100 dark:border-slate-800">
-                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1.5 flex items-center gap-1">
+                <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wide mb-1.5 flex items-center gap-1">
                   <Users size={11} /> Participantes
                   {attendees.isLoading && <Loader2 size={10} className="animate-spin" />}
                 </p>
@@ -599,7 +599,10 @@ function EventChip({ ev, weekMode = false }: { ev: CalendarEvent; weekMode?: boo
                           >
                             {a.name}
                             {a.role === 'OPT' && (
-                              <span className="text-slate-400"> · opcional</span>
+                              <span className="text-slate-400 dark:text-slate-500">
+                                {' '}
+                                · opcional
+                              </span>
                             )}
                           </span>
                           <span
@@ -612,13 +615,15 @@ function EventChip({ ev, weekMode = false }: { ev: CalendarEvent; weekMode?: boo
                     })}
                   </ul>
                 ) : attendees.isLoading ? (
-                  <p className="text-[11px] text-slate-400">Carregando…</p>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500">Carregando…</p>
                 ) : attendees.isError ? (
-                  <p className="text-[11px] text-red-400">
+                  <p className="text-[11px] text-red-400 dark:text-red-300">
                     Não foi possível carregar os participantes.
                   </p>
                 ) : (
-                  <p className="text-[11px] text-slate-400">Sem outros participantes.</p>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500">
+                    Sem outros participantes.
+                  </p>
                 )}
               </div>
             )}
@@ -653,7 +658,7 @@ function EventChip({ ev, weekMode = false }: { ev: CalendarEvent; weekMode?: boo
 
             {!ev.local && !ev.isOrganizer && !canceled && (
               <div className="mt-2.5 pt-2.5 border-t border-slate-100 dark:border-slate-800">
-                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1.5">
+                <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wide mb-1.5">
                   {rsvpHeading(currentPtst)}
                 </p>
                 <RsvpButtons
@@ -663,7 +668,7 @@ function EventChip({ ev, weekMode = false }: { ev: CalendarEvent; weekMode?: boo
                   onPick={doReply}
                 />
                 {reply.isError && (
-                  <p className="text-[11px] text-red-500 mt-1.5">
+                  <p className="text-[11px] text-red-500 dark:text-red-400 mt-1.5">
                     Falha ao responder. Tente novamente.
                   </p>
                 )}
@@ -730,27 +735,27 @@ function SeriesStrip({ series }: { series: Series }) {
                 <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 leading-tight">
                   {ev.subject}
                 </p>
-                <p className="text-[11px] text-slate-500 mt-0.5">{range}</p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{range}</p>
               </div>
             </div>
 
-            <p className="text-[11px] text-slate-500 mt-2">
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2">
               Série recorrente · <strong>{series.days.size}</strong> ocorrências no período exibido
             </p>
             {ev.organizer && (
-              <p className="text-[11px] text-slate-400 mt-0.5 truncate">
+              <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 truncate">
                 Organizador: {ev.organizer.name}
               </p>
             )}
             {ev.location && (
-              <p className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1">
+              <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 flex items-center gap-1">
                 <MapPin size={10} /> {ev.location}
               </p>
             )}
 
             {!ev.isOrganizer && (
               <div className="mt-2.5 pt-2.5 border-t border-slate-100 dark:border-slate-800">
-                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1.5">
+                <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wide mb-1.5">
                   {rsvpHeading(currentPtst)}
                 </p>
                 <RsvpButtons
@@ -764,11 +769,11 @@ function SeriesStrip({ series }: { series: Series }) {
                 {/* O Zimbra responde à SÉRIE quando não mandamos exceptId — e é isso
                     que fazemos. Dizer isso em voz alta evita que a pessoa ache que
                     está respondendo só ao dia que clicou. */}
-                <p className="text-[10px] text-slate-400 mt-1.5">
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5">
                   A resposta vale para a série inteira e notifica o organizador.
                 </p>
                 {reply.isError && (
-                  <p className="text-[11px] text-red-500 mt-1.5">
+                  <p className="text-[11px] text-red-500 dark:text-red-400 mt-1.5">
                     Falha ao responder. Tente novamente.
                   </p>
                 )}
@@ -785,7 +790,7 @@ function SeriesStrip({ series }: { series: Series }) {
               >
                 <BellOff size={12} /> Silenciar no mês
               </button>
-              <p className="text-[10px] text-slate-400 mt-1.5">
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5">
                 Some do panorama mensal, mas continua aparecendo na visão <strong>Semana</strong>.
                 Não recusa o convite nem avisa o organizador.
               </p>
@@ -811,7 +816,7 @@ function DayCell({
   return (
     <div
       ref={setNodeRef}
-      className={`${className} ${isOver ? 'ring-2 ring-inset ring-blue-400 bg-blue-50/70' : ''}`}
+      className={`${className} ${isOver ? 'ring-2 ring-inset ring-blue-400 dark:ring-blue-600 bg-blue-50/70 dark:bg-blue-900/30' : ''}`}
     >
       {children}
     </div>
@@ -849,31 +854,31 @@ function PersonSelect({
           setSearch('');
           setOpen((v) => !v);
         }}
-        className="flex items-center gap-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:border-slate-300 rounded-lg px-2.5 py-1.5 min-w-40 max-w-56"
+        className="flex items-center gap-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 rounded-lg px-2.5 py-1.5 min-w-40 max-w-56"
       >
-        <User size={13} className="text-slate-400 flex-shrink-0" />
+        <User size={13} className="text-slate-400 dark:text-slate-500 flex-shrink-0" />
         <span className="truncate flex-1 text-left">
           {current ? current.name : 'Minhas tarefas'}
         </span>
-        <ChevronDown size={14} className="text-slate-400 flex-shrink-0" />
+        <ChevronDown size={14} className="text-slate-400 dark:text-slate-500 flex-shrink-0" />
       </button>
       {open && (
         <div
-          className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl z-30 w-60 flex flex-col"
+          className="absolute right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl z-30 w-60 flex flex-col"
           style={{ maxHeight: 320 }}
         >
-          <div className="p-2 border-b border-slate-100">
+          <div className="p-2 border-b border-slate-100 dark:border-slate-800">
             <div className="relative">
               <Search
                 size={13}
-                className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400"
+                className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
               />
               <input
                 autoFocus
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Buscar pessoa..."
-                className="w-full text-xs border border-slate-200 rounded pl-7 pr-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                className="w-full text-xs border border-slate-200 dark:border-slate-700 rounded pl-7 pr-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white dark:bg-slate-800 dark:text-slate-100"
               />
             </div>
           </div>
@@ -883,12 +888,12 @@ function PersonSelect({
                 onChange(null);
                 setOpen(false);
               }}
-              className={`w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-blue-50 ${value == null ? 'font-semibold text-blue-600' : 'text-slate-700'}`}
+              className={`w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-blue-50 dark:hover:bg-blue-900/30 ${value == null ? 'font-semibold text-blue-600 dark:text-blue-400' : 'text-slate-700 dark:text-slate-200'}`}
             >
               <span>Minhas tarefas</span>
               {value == null && <Check size={12} className="flex-shrink-0" />}
             </button>
-            <div className="border-t border-slate-100 my-1" />
+            <div className="border-t border-slate-100 dark:border-slate-800 my-1" />
             {filtered.map((m) => (
               <button
                 key={m.id}
@@ -896,14 +901,14 @@ function PersonSelect({
                   onChange(m.id);
                   setOpen(false);
                 }}
-                className={`w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-blue-50 ${m.id === value ? 'font-semibold text-blue-600' : 'text-slate-700'}`}
+                className={`w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-blue-50 dark:hover:bg-blue-900/30 ${m.id === value ? 'font-semibold text-blue-600 dark:text-blue-400' : 'text-slate-700 dark:text-slate-200'}`}
               >
                 <span className="truncate">{m.name}</span>
                 {m.id === value && <Check size={12} className="flex-shrink-0" />}
               </button>
             ))}
             {filtered.length === 0 && (
-              <p className="px-3 py-2 text-xs text-slate-400">Nenhuma pessoa</p>
+              <p className="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Nenhuma pessoa</p>
             )}
           </div>
         </div>
@@ -935,23 +940,23 @@ function BacklogChip({
       {...attributes}
       onClick={() => onIssueClick(issue.id)}
       title={`#${issue.id} ${issue.subject} — ${issue.status.name}${issue.assigned_to ? ` · ${issue.assigned_to.name}` : ''}`}
-      className={`group w-full flex items-center gap-1.5 text-left rounded-md px-2 py-1 text-[11px] bg-white border border-slate-200 hover:border-blue-300 hover:bg-blue-50 transition-colors cursor-grab active:cursor-grabbing touch-none select-none ${
+      className={`group w-full flex items-center gap-1.5 text-left rounded-md px-2 py-1 text-[11px] bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-grab active:cursor-grabbing touch-none select-none ${
         isDragging ? 'opacity-30' : ''
       }`}
     >
       <span
-        className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${closed ? 'bg-slate-300' : (PRIORITY_DOT[issue.priority.name] ?? 'bg-slate-300')}`}
+        className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${closed ? 'bg-slate-300 dark:bg-slate-600' : (PRIORITY_DOT[issue.priority.name] ?? 'bg-slate-300 dark:bg-slate-600')}`}
       />
       {showAssignee && issue.assigned_to && (
         <span
-          className="w-4 h-4 rounded-full bg-slate-200 text-slate-600 text-[8px] font-bold flex items-center justify-center flex-shrink-0"
+          className="w-4 h-4 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-200 text-[8px] font-bold flex items-center justify-center flex-shrink-0"
           title={issue.assigned_to.name}
         >
           {initials(issue.assigned_to.name)}
         </span>
       )}
       <span
-        className={`truncate ${closed ? 'text-slate-400 line-through' : 'text-slate-600 group-hover:text-blue-700'}`}
+        className={`truncate ${closed ? 'text-slate-400 dark:text-slate-500 line-through' : 'text-slate-600 dark:text-slate-300 group-hover:text-blue-700 dark:group-hover:text-blue-400'}`}
       >
         {issue.subject}
       </span>
@@ -981,14 +986,14 @@ function BacklogPanel({
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: 'backlog-drop' });
   return (
-    <div className="w-full h-full min-h-0 bg-white border border-slate-200 rounded-xl overflow-hidden flex flex-col">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-slate-200 bg-slate-50">
+    <div className="w-full h-full min-h-0 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden flex flex-col">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40">
         <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
           Sem data <span className="text-slate-400 dark:text-slate-500">({issues.length})</span>
         </span>
         <button
           onClick={onClose}
-          className="text-slate-400 hover:text-slate-600"
+          className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300"
           title="Ocultar backlog"
         >
           <X size={13} />
@@ -997,18 +1002,18 @@ function BacklogPanel({
 
       {/* No modo "Tudo", escolha o campo que o item recebe ao ser agendado */}
       {mode === 'all' && (
-        <div className="px-2.5 py-2 border-b border-slate-100">
-          <p className="text-[10px] text-slate-400 mb-1">Agendar como</p>
-          <div className="flex items-center bg-slate-100 rounded-lg p-0.5 text-[11px] font-medium">
+        <div className="px-2.5 py-2 border-b border-slate-100 dark:border-slate-700">
+          <p className="text-[10px] text-slate-400 dark:text-slate-500 mb-1">Agendar como</p>
+          <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 text-[11px] font-medium">
             <button
               onClick={() => onScheduleAs('due_date')}
-              className={`flex-1 flex items-center justify-center gap-1 px-2 py-1 rounded-md transition-all ${scheduleAs === 'due_date' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}
+              className={`flex-1 flex items-center justify-center gap-1 px-2 py-1 rounded-md transition-all ${scheduleAs === 'due_date' ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}
             >
               <Flag size={10} /> Prazo
             </button>
             <button
               onClick={() => onScheduleAs('review')}
-              className={`flex-1 flex items-center justify-center gap-1 px-2 py-1 rounded-md transition-all ${scheduleAs === 'review' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}
+              className={`flex-1 flex items-center justify-center gap-1 px-2 py-1 rounded-md transition-all ${scheduleAs === 'review' ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}
             >
               <Eye size={10} /> Revisão
             </button>
@@ -1018,10 +1023,10 @@ function BacklogPanel({
 
       <div
         ref={setNodeRef}
-        className={`flex-1 min-h-0 overflow-y-auto scrollbar-thin p-1.5 flex flex-col gap-1 transition-colors ${isOver ? 'bg-blue-50 ring-2 ring-inset ring-blue-300' : ''}`}
+        className={`flex-1 min-h-0 overflow-y-auto scrollbar-thin p-1.5 flex flex-col gap-1 transition-colors ${isOver ? 'bg-blue-50 dark:bg-blue-900/30 ring-2 ring-inset ring-blue-300 dark:ring-blue-700' : ''}`}
       >
         {issues.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-400 py-8 px-2">
+          <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-400 dark:text-slate-500 py-8 px-2">
             <CalendarDays size={22} className="mb-1.5 opacity-30" />
             <p className="text-[11px]">
               Tudo agendado!{isOver ? '' : ' Arraste um cartão aqui para remover a data.'}
@@ -1040,7 +1045,7 @@ function BacklogPanel({
         )}
       </div>
 
-      <div className="px-3 py-1.5 border-t border-slate-100 text-[10px] text-slate-400 leading-snug">
+      <div className="px-3 py-1.5 border-t border-slate-100 dark:border-slate-700 text-[10px] text-slate-400 dark:text-slate-500 leading-snug">
         Arraste para um dia para agendar · de volta aqui para remover a data.
       </div>
     </div>
@@ -1095,8 +1100,8 @@ function FilterMenu({
         onClick={() => setOpen((v) => !v)}
         className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
           activeCount > 0
-            ? 'border-blue-300 bg-blue-50 text-blue-700'
-            : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+            ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+            : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
         }`}
       >
         <Filter size={13} /> Filtros
@@ -1107,14 +1112,16 @@ function FilterMenu({
         )}
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-xl z-30 p-3 space-y-3">
+        <div className="absolute right-0 top-full mt-1 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl z-30 p-3 space-y-3">
           {projectOptions.length > 1 && (
             <div>
-              <p className="text-[11px] font-semibold text-slate-500 mb-1">Projeto</p>
+              <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                Projeto
+              </p>
               <select
                 value={projectFilter ?? ''}
                 onChange={(e) => setProjectFilter(e.target.value ? Number(e.target.value) : null)}
-                className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+                className="w-full text-xs border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white dark:bg-slate-800 dark:text-slate-100"
               >
                 <option value="">Todos os projetos</option>
                 {projectOptions.map((p) => (
@@ -1128,7 +1135,9 @@ function FilterMenu({
 
           {priorityOptions.length > 0 && (
             <div>
-              <p className="text-[11px] font-semibold text-slate-500 mb-1.5">Prioridade</p>
+              <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1.5">
+                Prioridade
+              </p>
               <div className="flex flex-wrap gap-1.5">
                 {priorityOptions.map((p) => {
                   const on = priorityFilter.has(p);
@@ -1138,12 +1147,12 @@ function FilterMenu({
                       onClick={() => togglePriority(p)}
                       className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border transition-colors ${
                         on
-                          ? 'border-blue-300 bg-blue-50 text-blue-700'
-                          : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+                          ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+                          : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
                       }`}
                     >
                       <span
-                        className={`w-1.5 h-1.5 rounded-full ${PRIORITY_DOT[p] ?? 'bg-slate-300'}`}
+                        className={`w-1.5 h-1.5 rounded-full ${PRIORITY_DOT[p] ?? 'bg-slate-300 dark:bg-slate-600'}`}
                       />
                       {p}
                     </button>
@@ -1153,12 +1162,12 @@ function FilterMenu({
             </div>
           )}
 
-          <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer select-none">
+          <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer select-none">
             <input
               type="checkbox"
               checked={hideClosed}
               onChange={(e) => setHideClosed(e.target.checked)}
-              className="rounded border-slate-300 text-blue-600 focus:ring-blue-400"
+              className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-400"
             />
             Ocultar concluídas
           </label>
@@ -1166,7 +1175,7 @@ function FilterMenu({
           {activeCount > 0 && (
             <button
               onClick={clearAll}
-              className="w-full text-xs text-slate-500 hover:text-red-600 border-t border-slate-100 pt-2 mt-1"
+              className="w-full text-xs text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 border-t border-slate-100 dark:border-slate-800 pt-2 mt-1"
             >
               Limpar filtros
             </button>
@@ -1451,15 +1460,15 @@ export function CalendarView({ projectId, onIssueClick }: Props) {
     <div className="max-w-6xl mx-auto">
       <div className="mb-4">
         <div>
-          <h2 className="text-lg font-semibold text-slate-800">Calendário</h2>
-          <p className="text-sm text-slate-500 mt-0.5">
+          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Calendário</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
             {personId == null ? 'Suas tarefas' : 'Tarefas da pessoa'} por{' '}
             {field === 'all'
               ? 'prazo e previsão de revisão'
               : field === 'due_date'
                 ? 'prazo'
                 : 'previsão de revisão'}
-            <span className="text-slate-400"> · arraste para reagendar</span>.
+            <span className="text-slate-400 dark:text-slate-500"> · arraste para reagendar</span>.
           </p>
         </div>
 
@@ -1474,16 +1483,16 @@ export function CalendarView({ projectId, onIssueClick }: Props) {
           />
 
           {/* Mês / Semana */}
-          <div className="flex items-center bg-slate-100 rounded-lg p-0.5 text-xs font-medium">
+          <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 text-xs font-medium">
             <button
               onClick={() => setView('month')}
-              className={`px-2.5 py-1.5 rounded-md transition-all ${view === 'month' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              className={`px-2.5 py-1.5 rounded-md transition-all ${view === 'month' ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'}`}
             >
               Mês
             </button>
             <button
               onClick={() => setView('week')}
-              className={`px-2.5 py-1.5 rounded-md transition-all ${view === 'week' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              className={`px-2.5 py-1.5 rounded-md transition-all ${view === 'week' ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'}`}
             >
               Semana
             </button>
@@ -1549,7 +1558,7 @@ export function CalendarView({ projectId, onIssueClick }: Props) {
               className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
                 showEvents
                   ? 'border-teal-200 bg-teal-50 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400 dark:border-teal-800'
-                  : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+                  : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
               }`}
             >
               {eventsQuery.isFetching ? (
@@ -1611,31 +1620,31 @@ export function CalendarView({ projectId, onIssueClick }: Props) {
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => shift(-1)}
-            className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100"
+            className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
             title={weekMode ? 'Semana anterior' : 'Mês anterior'}
           >
             <ChevronLeft size={16} />
           </button>
-          <span className="text-sm font-semibold text-slate-800 capitalize min-w-44 text-center">
+          <span className="text-sm font-semibold text-slate-800 dark:text-slate-100 capitalize min-w-44 text-center">
             {headerLabel}
           </span>
           <button
             onClick={() => shift(1)}
-            className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100"
+            className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
             title={weekMode ? 'Próxima semana' : 'Próximo mês'}
           >
             <ChevronRight size={16} />
           </button>
           <button
             onClick={() => setCursor(new Date())}
-            className="ml-1 text-xs font-medium text-blue-600 hover:bg-blue-50 px-2 py-1 rounded-lg"
+            className="ml-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 px-2 py-1 rounded-lg"
           >
             Hoje
           </button>
         </div>
-        <div className="flex items-center gap-3 text-xs text-slate-400">
+        <div className="flex items-center gap-3 text-xs text-slate-400 dark:text-slate-500">
           {updateIssue.isPending && (
-            <span className="flex items-center gap-1 text-blue-500">
+            <span className="flex items-center gap-1 text-blue-500 dark:text-blue-400">
               <Loader2 size={12} className="animate-spin" /> salvando…
             </span>
           )}
@@ -1644,7 +1653,7 @@ export function CalendarView({ projectId, onIssueClick }: Props) {
           </span>
           <button
             onClick={() => refetch()}
-            className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100"
+            className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
             title="Atualizar"
           >
             <RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />
@@ -1653,21 +1662,21 @@ export function CalendarView({ projectId, onIssueClick }: Props) {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center py-20 text-slate-400">
+        <div className="flex items-center justify-center py-20 text-slate-400 dark:text-slate-500">
           <RefreshCw size={20} className="animate-spin" />
         </div>
       ) : (
         <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
           <div className="relative">
             <div
-              className={`bg-white border border-slate-200 rounded-xl overflow-hidden ${showBacklog ? 'mr-[252px]' : ''}`}
+              className={`bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden ${showBacklog ? 'mr-[252px]' : ''}`}
             >
               {/* Cabeçalho dos dias da semana */}
-              <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50">
+              <div className="grid grid-cols-7 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40">
                 {WEEKDAYS.map((w) => (
                   <div
                     key={w}
-                    className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400 text-center"
+                    className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 text-center"
                   >
                     {w}
                   </div>
@@ -1689,8 +1698,12 @@ export function CalendarView({ projectId, onIssueClick }: Props) {
                     <DayCell
                       key={dayStr}
                       dayStr={dayStr}
-                      className={`${weekMode ? 'min-h-[26rem]' : 'min-h-28'} border-b border-r border-slate-100 p-1.5 flex flex-col gap-1 ${
-                        !inMonth ? 'bg-slate-50/60' : weekend ? 'bg-slate-50/40' : 'bg-white'
+                      className={`${weekMode ? 'min-h-[26rem]' : 'min-h-28'} border-b border-r border-slate-100 dark:border-slate-700/60 p-1.5 flex flex-col gap-1 ${
+                        !inMonth
+                          ? 'bg-slate-50/60 dark:bg-slate-900/40'
+                          : weekend
+                            ? 'bg-slate-50/40 dark:bg-slate-900/20'
+                            : 'bg-white dark:bg-slate-800'
                       }`}
                     >
                       {/* Séries recorrentes: filete no topo, sem texto e sem altura própria. */}
@@ -1704,8 +1717,8 @@ export function CalendarView({ projectId, onIssueClick }: Props) {
                             isToday
                               ? 'bg-blue-600 text-white font-bold'
                               : inMonth
-                                ? 'text-slate-600'
-                                : 'text-slate-300'
+                                ? 'text-slate-600 dark:text-slate-300'
+                                : 'text-slate-300 dark:text-slate-600'
                           }`}
                         >
                           {format(day, 'd')}
@@ -1736,7 +1749,7 @@ export function CalendarView({ projectId, onIssueClick }: Props) {
                         {!weekMode && dayIssues.length > 3 && (
                           <button
                             onClick={() => toggleExpand(dayStr)}
-                            className="text-[10px] text-slate-400 hover:text-blue-600 px-1 text-left"
+                            className="text-[10px] text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 px-1 text-left"
                           >
                             {expanded.has(dayStr)
                               ? 'mostrar menos'
@@ -1760,7 +1773,7 @@ export function CalendarView({ projectId, onIssueClick }: Props) {
                         s.sample.ptst === 'NE' ? 'bg-slate-300 dark:bg-slate-600' : 'bg-teal-400'
                       }`}
                     />
-                    <Repeat size={10} className="text-slate-400" />
+                    <Repeat size={10} className="text-slate-400 dark:text-slate-500" />
                     {s.sample.start != null && `${format(new Date(s.sample.start), 'HH:mm')} `}
                     {s.sample.subject}
                     {s.sample.ptst === 'NE' && (
@@ -1835,10 +1848,14 @@ export function CalendarView({ projectId, onIssueClick }: Props) {
                   >
                     <TypeIcon
                       size={10}
-                      className={dragging.type === 'review' ? 'text-violet-500 dark:text-violet-400' : 'text-slate-400 dark:text-slate-500'}
+                      className={
+                        dragging.type === 'review'
+                          ? 'text-violet-500 dark:text-violet-400'
+                          : 'text-slate-400 dark:text-slate-500'
+                      }
                     />
                     <span
-                      className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${PRIORITY_DOT[dragging.issue.priority.name] ?? 'bg-slate-300'}`}
+                      className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${PRIORITY_DOT[dragging.issue.priority.name] ?? 'bg-slate-300 dark:bg-slate-600'}`}
                     />
                     <span className="truncate max-w-40 text-slate-700 dark:text-slate-200">
                       {dragging.issue.subject}
@@ -1851,7 +1868,7 @@ export function CalendarView({ projectId, onIssueClick }: Props) {
       )}
 
       {!isLoading && scheduledCount === 0 && (
-        <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+        <div className="flex flex-col items-center justify-center py-12 text-slate-400 dark:text-slate-500">
           <CalendarDays size={28} className="mb-2 opacity-30" />
           <p className="text-sm">
             Nenhuma tarefa com{' '}

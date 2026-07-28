@@ -64,16 +64,16 @@ export function ThroughputChart({ open, completed }: Props) {
   const totalClosed = data.reduce((s, d) => s + d.closed, 0);
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5">
+    <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-slate-700">
+        <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
           Criadas vs concluídas — últimas {WEEKS} semanas
         </h3>
         <div className="flex items-center gap-3 text-xs">
-          <span className="flex items-center gap-1.5 text-slate-500">
+          <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
             <span className="w-2.5 h-2.5 rounded-sm bg-blue-500" /> Criadas ({totalCreated})
           </span>
-          <span className="flex items-center gap-1.5 text-slate-500">
+          <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
             <span className="w-2.5 h-2.5 rounded-sm bg-green-500" /> Concluídas ({totalClosed})
           </span>
         </div>
@@ -94,11 +94,13 @@ export function ThroughputChart({ open, completed }: Props) {
                 title={`Semana de ${d.label}: ${d.closed} concluída(s)`}
               />
             </div>
-            <span className="text-[10px] text-slate-400 whitespace-nowrap">{d.label}</span>
+            <span className="text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap">
+              {d.label}
+            </span>
           </div>
         ))}
       </div>
-      <p className="text-xs text-slate-400 mt-2 text-center">
+      <p className="text-xs text-slate-400 dark:text-slate-500 mt-2 text-center">
         Início de cada semana (segunda-feira)
       </p>
     </div>

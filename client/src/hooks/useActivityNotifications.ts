@@ -3,7 +3,7 @@ import type { Issue, Mention } from '../types/redmine';
 import { useBrowserNotifications } from './useBrowserNotifications';
 import { wasRecentlyMutated } from '../utils/recentMutations';
 
-export type NotifType = 'assigned' | 'activity' | 'review' | 'mention' | 'mail';
+export type NotifType = 'assigned' | 'activity' | 'review' | 'mention' | 'mail' | 'workflow';
 
 interface NotifIssue {
   id: number;

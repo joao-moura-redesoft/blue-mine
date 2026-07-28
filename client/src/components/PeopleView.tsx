@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useProjects, useProjectMembers, useAllMembers, useUserIssues } from '../hooks/useRedmine';
 import { IssueListView } from './IssueListView';
+import { TalkContactButton } from './TalkContactButton';
 import { ChevronDown, Search, Check, User, Users } from 'lucide-react';
 
 const TEAM_ORDER = [
@@ -17,9 +18,11 @@ const TEAM_ORDER = [
 
 interface Props {
   onIssueClick: (id: number) => void;
+  onOpenTalk?: (ncUid: string) => void;
+  openingTalkFor?: string | null;
 }
 
-export function PeopleView({ onIssueClick }: Props) {
+export function PeopleView({ onIssueClick, onOpenTalk, openingTalkFor }: Props) {
   const { data: projects } = useProjects();
 
   // 'all' = todas as pessoas de todos os projetos (padrão)
@@ -38,8 +41,8 @@ export function PeopleView({ onIssueClick }: Props) {
   return (
     <div className="max-w-6xl mx-auto">
       <div className="mb-4">
-        <h2 className="text-lg font-semibold text-slate-800">Pessoas</h2>
-        <p className="text-sm text-slate-500 mt-0.5">
+        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Pessoas</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
           Veja as tarefas abertas de qualquer pessoa da equipe.
         </p>
       </div>
@@ -71,7 +74,7 @@ export function PeopleView({ onIssueClick }: Props) {
         </div>
       ) : (
         <>
-          <div className="flex items-center gap-2 mb-3 text-sm text-slate-600">
+          <div className="flex items-center gap-2 mb-3 text-sm text-slate-600 dark:text-slate-300">
             <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold">
               {person?.name
                 ?.split(' ')
@@ -80,8 +83,15 @@ export function PeopleView({ onIssueClick }: Props) {
                 .join('')
                 .toUpperCase()}
             </div>
-            <span className="font-medium text-slate-800">{person?.name}</span>
+            <span className="font-medium text-slate-800 dark:text-slate-100">{person?.name}</span>
             {person?.team && <span className="text-xs text-slate-400">· {person.team}</span>}
+            {onOpenTalk && (
+              <TalkContactButton
+                redmineUserId={personId}
+                onOpenTalk={onOpenTalk}
+                openingTalkFor={openingTalkFor}
+              />
+            )}
           </div>
           <IssueListView
             issues={userIssues.data}
@@ -130,17 +140,17 @@ function ProjectPicker({
           setSearch('');
           setOpen((v) => !v);
         }}
-        className="flex items-center gap-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 hover:border-slate-300 rounded-lg px-3 py-2 min-w-56 max-w-72"
+        className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 rounded-lg px-3 py-2 min-w-56 max-w-72"
       >
         <span className="truncate flex-1 text-left">{label}</span>
         <ChevronDown size={14} className="text-slate-400 flex-shrink-0" />
       </button>
       {open && (
         <div
-          className="absolute left-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl z-30 w-72 flex flex-col"
+          className="absolute left-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl z-30 w-72 flex flex-col"
           style={{ maxHeight: 320 }}
         >
-          <div className="p-2 border-b border-slate-100">
+          <div className="p-2 border-b border-slate-100 dark:border-slate-800">
             <div className="relative">
               <Search
                 size={13}
@@ -151,7 +161,7 @@ function ProjectPicker({
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Filtrar projeto..."
-                className="w-full text-xs border border-slate-200 rounded pl-7 pr-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                className="w-full text-xs border border-slate-200 dark:border-slate-700 rounded pl-7 pr-2 py-1.5 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-400"
               />
             </div>
           </div>
@@ -161,12 +171,12 @@ function ProjectPicker({
                 onChange('all');
                 setOpen(false);
               }}
-              className={`w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-blue-50 ${value === 'all' ? 'font-semibold text-blue-600' : 'text-slate-700'}`}
+              className={`w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-blue-50 dark:hover:bg-slate-800 ${value === 'all' ? 'font-semibold text-blue-600 dark:text-blue-400' : 'text-slate-700 dark:text-slate-200'}`}
             >
               <span className="truncate">Todos os projetos</span>
               {value === 'all' && <Check size={12} className="flex-shrink-0" />}
             </button>
-            <div className="border-t border-slate-100 my-1" />
+            <div className="border-t border-slate-100 dark:border-slate-800 my-1" />
             {filtered.map((p) => (
               <button
                 key={p.id}
@@ -174,7 +184,7 @@ function ProjectPicker({
                   onChange(p.id);
                   setOpen(false);
                 }}
-                className={`w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-blue-50 ${p.id === value ? 'font-semibold text-blue-600' : 'text-slate-700'}`}
+                className={`w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-blue-50 dark:hover:bg-slate-800 ${p.id === value ? 'font-semibold text-blue-600 dark:text-blue-400' : 'text-slate-700 dark:text-slate-200'}`}
               >
                 <span className="truncate">{p.name}</span>
                 {p.id === value && <Check size={12} className="flex-shrink-0" />}
@@ -236,7 +246,7 @@ function PersonPicker({
           setSearch('');
           setOpen((v) => !v);
         }}
-        className="flex items-center gap-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 hover:border-slate-300 rounded-lg px-3 py-2 min-w-56 max-w-72 disabled:opacity-50 disabled:cursor-not-allowed"
+        className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 rounded-lg px-3 py-2 min-w-56 max-w-72 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <User size={14} className="text-slate-400 flex-shrink-0" />
         <span className="truncate flex-1 text-left">{current?.name ?? 'Selecionar pessoa...'}</span>
@@ -244,10 +254,10 @@ function PersonPicker({
       </button>
       {open && (
         <div
-          className="absolute left-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl z-30 w-72 flex flex-col"
+          className="absolute left-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl z-30 w-72 flex flex-col"
           style={{ maxHeight: 340 }}
         >
-          <div className="p-2 border-b border-slate-100">
+          <div className="p-2 border-b border-slate-100 dark:border-slate-800">
             <div className="relative">
               <Search
                 size={13}
@@ -258,15 +268,18 @@ function PersonPicker({
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Buscar pessoa..."
-                className="w-full text-xs border border-slate-200 rounded pl-7 pr-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                className="w-full text-xs border border-slate-200 dark:border-slate-700 rounded pl-7 pr-2 py-1.5 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-400"
               />
             </div>
           </div>
           <div className="overflow-y-auto scrollbar-thin py-1">
             {teams.map((team) => (
               <div key={team}>
-                <p className="px-3 pt-2 pb-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400 bg-slate-50/70">
-                  {team} <span className="text-slate-300">({grouped[team].length})</span>
+                <p className="px-3 pt-2 pb-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400 bg-slate-50/70 dark:bg-slate-800/50">
+                  {team}{' '}
+                  <span className="text-slate-300 dark:text-slate-600">
+                    ({grouped[team].length})
+                  </span>
                 </p>
                 {grouped[team].map((m) => (
                   <button
@@ -275,7 +288,7 @@ function PersonPicker({
                       onChange(m.id);
                       setOpen(false);
                     }}
-                    className={`w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-blue-50 ${m.id === value ? 'font-semibold text-blue-600' : 'text-slate-700'}`}
+                    className={`w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-blue-50 dark:hover:bg-slate-800 ${m.id === value ? 'font-semibold text-blue-600 dark:text-blue-400' : 'text-slate-700 dark:text-slate-200'}`}
                   >
                     <span className="truncate">{m.name}</span>
                     {m.id === value && <Check size={12} className="flex-shrink-0" />}

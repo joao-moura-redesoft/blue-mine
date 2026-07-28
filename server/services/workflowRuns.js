@@ -25,4 +25,29 @@ function listRuns(uid, workflowId) {
   return workflowId ? all.filter((r) => r.workflowId === workflowId) : all;
 }
 
-module.exports = { record, listRuns };
+// Disparos da ação "Notificar (push)" de um usuário, mais recentes primeiro —
+// alimenta o sino (notificação in-app), independente do Web Push ter uma
+// inscrição ativa ou não. `store[uid]` já vem mais-recente-primeiro (unshift em
+// `record`), então corta assim que atinge o limite.
+function listNotifyEvents(uid, limit = 30) {
+  const all = store[uid] || [];
+  const out = [];
+  for (const r of all) {
+    for (let i = 0; i < r.actions.length; i++) {
+      const a = r.actions[i];
+      if (a.type !== 'notify' || !a.ok) continue;
+      out.push({
+        id: `${r.id}-${i}`,
+        workflowId: r.workflowId,
+        title: a.title || 'Automação',
+        body: a.body || '',
+        issueId: a.issueId,
+        at: r.at,
+      });
+      if (out.length >= limit) return out;
+    }
+  }
+  return out;
+}
+
+module.exports = { record, listRuns, listNotifyEvents };

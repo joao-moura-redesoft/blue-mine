@@ -10,15 +10,26 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-// Inject the Vite+Workbox precache manifest (replaced at build time)
-precacheAndRoute(self.__WB_MANIFEST);
+// Inject the Vite+Workbox precache manifest (replaced at build time).
+// Em `vite dev` o __WB_MANIFEST NÃO é substituído e vem `undefined`;
+// precacheAndRoute(undefined) LANÇA na avaliação do SW ("ServiceWorker script
+// evaluation failed"), o SW novo não instala, e o SW antigo fica preso servindo
+// cache velho (tela antiga no start + autoUpdate nunca recarrega). O `?? []` deixa
+// o SW avaliar limpo no dev (sem precache) e não muda nada no build de produção.
+const manifest = self.__WB_MANIFEST ?? [];
+precacheAndRoute(manifest);
 
-// SPA fallback: serve index.html for all navigations except /api/
-registerRoute(
-  new NavigationRoute(createHandlerBoundToURL('/index.html'), {
-    denylist: [/^\/api\//],
-  }),
-);
+// SPA fallback: serve index.html for all navigations except /api/. Só faz
+// sentido com um precache de verdade (produção/hospedagem estática) — em dev o
+// próprio servidor do Vite já resolve qualquer rota para index.html sozinho, e
+// `createHandlerBoundToURL` EXIGE a URL precacheada (lança "non-precached-url"
+// e derruba a avaliação do SW inteiro se chamada com o manifesto vazio). Em dev,
+// não registra a rota: deixa a navegação passar direto pro Vite, sem o SW no meio.
+if (manifest.length > 0) {
+  registerRoute(
+    new NavigationRoute(createHandlerBoundToURL('/index.html'), { denylist: [/^\/api\//] }),
+  );
+}
 
 // ── Push (servidor → notificação com a aba fechada) ───────────────────────
 // O servidor empurra eventos de push enquanto o app está fechado. Se houver
