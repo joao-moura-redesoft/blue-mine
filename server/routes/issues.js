@@ -16,10 +16,48 @@ const { parseEditFormSchema } = require('../lib/editFormSchema');
 const { REDMINE_CF, REDMINE_STATUS } = require('../lib/config');
 const { sanitizeIssueBody, toLatin1Safe } = require('../lib/latin1');
 const { getInternalCaAgent } = require('../lib/internalCa');
+const issueEvents = require('../services/issueEvents');
 
 // Filtros nomeados por campo custom, resolvidos pela config central (env-overridable).
 const CF_DEVELOPER = `cf_${REDMINE_CF.developer}`;
 const CF_REVIEWER = `cf_${REDMINE_CF.reviewer}`;
+
+// SSE: avisa a janela aberta que as tarefas mudaram, para ela rebuscar sob
+// demanda em vez de varrer o Redmine a cada 60-90s por conta própria (o servidor
+// já varre para o Web Push — ver services/issueEvents.js para o porquê de
+// mandarmos invalidação e não os dados).
+//
+// O cliente NÃO pode depender só disto: se o polling do servidor estiver
+// desligado (PUSH_ENABLED=0) ou sem inscrição, nenhum evento sai. Por isso o
+// front mantém um intervalo de segurança, longo, e trata este canal como
+// acelerador — nunca como única fonte de atualização.
+router.get(
+  '/issues/stream',
+  handle(async (req, res) => {
+    const url = req.headers['x-redmine-url'] || DEFAULT_URL;
+    const uid = await getMyUserId(req);
+    const key = issueEvents.makeKey(url, uid);
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+    res.write(': conectado\n\n');
+
+    const unsubscribe = issueEvents.subscribe(key, (payload) => {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    });
+
+    // Comentário periódico: mantém o socket vivo através de proxies e faz o
+    // EventSource perceber a queda (ele só reconecta ao ver o stream morrer).
+    const keepAlive = setInterval(() => res.write(': ping\n\n'), 25_000);
+
+    req.on('close', () => {
+      clearInterval(keepAlive);
+      unsubscribe();
+    });
+  }),
+);
 
 // Minhas issues
 router.get(

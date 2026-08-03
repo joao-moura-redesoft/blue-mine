@@ -5,7 +5,9 @@
 // o próprio app já cuida via o polling em segundo plano (refetchIntervalInBackground),
 // evitando notificações duplicadas.
 const axios = require('axios');
+const crypto = require('crypto');
 const webpush = require('web-push');
+const issueEvents = require('./issueEvents');
 const { buildAuthHeaders } = require('../lib/redmine');
 const { getInternalCaAgent } = require('../lib/internalCa');
 const { fetchAllIssues } = require('../lib/pagination');
@@ -95,6 +97,11 @@ async function collectPushState(url, key, username, password) {
   [...assigned, ...review, ...monitored, ...authored].forEach((i) => byId.set(i.id, i));
   return {
     issues: byId,
+    me,
+    // Impressão digital do estado: muda quando entra/sai tarefa OU quando uma
+    // existente é editada. O diff de IDs abaixo só enxerga entrada/saída, então
+    // sozinho ele não serviria para avisar a janela aberta de uma edição.
+    fingerprint: fingerprintOf(byId),
     seen: {
       assigned: assigned.map((i) => i.id),
       review: review.map((i) => i.id),
@@ -102,6 +109,15 @@ async function collectPushState(url, key, username, password) {
       authored: authored.map((i) => i.id),
     },
   };
+}
+
+// Digest curto e estável de id+updated_on de todas as tarefas da varredura.
+function fingerprintOf(byId) {
+  const parts = [...byId.values()]
+    .map((i) => `${i.id}:${i.updated_on || ''}`)
+    .sort()
+    .join(',');
+  return crypto.createHash('sha1').update(parts).digest('hex');
 }
 
 function getVapidPublicKey() {
@@ -251,12 +267,22 @@ async function pollPush() {
   try {
     for (const rec of [...subscriptions]) {
       try {
-        const { issues, seen } = await collectPushState(
+        const { issues, seen, me, fingerprint } = await collectPushState(
           rec.url,
           rec.key || '',
           rec.username || '',
           rec.password || '',
         );
+
+        // Avisa a janela aberta que algo mudou, para ela rebuscar sob demanda em
+        // vez de varrer o Redmine por conta própria a cada 60-90s. Vai fora do
+        // laço de notificação porque cobre TAMBÉM edição de tarefa existente,
+        // que o diff de IDs abaixo não enxerga.
+        if (rec.fingerprint && rec.fingerprint !== fingerprint) {
+          issueEvents.emit(issueEvents.makeKey(rec.url, me), { reason: 'poll' });
+        }
+        rec.fingerprint = fingerprint;
+
         const prev = rec.seen || { assigned: [], review: [], monitored: [] };
         const toNotify = [];
 
@@ -577,4 +603,5 @@ module.exports = {
   sendPush,
   collectPushState,
   getSubscriptions,
+  __testables: { fingerprintOf },
 };

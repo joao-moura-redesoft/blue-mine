@@ -17,6 +17,7 @@ import type {
 } from '../types/redmine';
 import { useLocalWatches } from '../utils/localWatches';
 import { recordMutation } from '../utils/recentMutations';
+import { useIssueStreamConnected } from './useIssueStream';
 
 export function useCurrentUser() {
   return useQuery({ queryKey: ['currentUser'], queryFn: redmineApi.getCurrentUser });
@@ -71,11 +72,29 @@ export function useCustomFieldDefs() {
   });
 }
 
+/**
+ * Intervalo de segurança das queries de tarefas.
+ *
+ * Com o canal SSE de pé (useIssueStream), o servidor avisa quando algo muda e o
+ * polling vira só uma rede de proteção — por isso o intervalo longo. Sem canal,
+ * volta ao intervalo original: PUSH_ENABLED=0, ausência de inscrição ou servidor
+ * reiniciando deixariam a tela parada se confiássemos apenas no aviso.
+ *
+ * Não desligamos o polling por completo nem com o canal ligado: um evento
+ * perdido (socket morto sem `onerror`, por exemplo) deixaria a tela desatualizada
+ * indefinidamente, e tela velha silenciosa é pior que uma requisição a mais.
+ */
+const FALLBACK_COM_STREAM = 10 * 60 * 1000;
+
+function useIssueRefetchInterval(semStream: number) {
+  return useIssueStreamConnected() ? FALLBACK_COM_STREAM : semStream;
+}
+
 export function useIssues(projectId?: number) {
   return useQuery({
     queryKey: ['issues', projectId],
     queryFn: () => redmineApi.getIssues(projectId),
-    refetchInterval: 60 * 1000,
+    refetchInterval: useIssueRefetchInterval(60 * 1000),
     // Mantém o polling rodando mesmo com a aba minimizada/em segundo plano,
     // para que as notificações de novas atribuições continuem disparando.
     refetchIntervalInBackground: true,
@@ -239,7 +258,7 @@ export function useMonitoredIssues() {
   return useQuery({
     queryKey: ['issues-monitored'],
     queryFn: redmineApi.getMonitoredIssues,
-    refetchInterval: 90 * 1000,
+    refetchInterval: useIssueRefetchInterval(90 * 1000),
     refetchIntervalInBackground: true,
   });
 }
@@ -248,7 +267,7 @@ export function useAuthoredIssues() {
   return useQuery({
     queryKey: ['issues-authored'],
     queryFn: redmineApi.getAuthoredIssues,
-    refetchInterval: 90 * 1000,
+    refetchInterval: useIssueRefetchInterval(90 * 1000),
   });
 }
 
@@ -260,7 +279,7 @@ export function useWatchedIssues() {
   return useQuery({
     queryKey: ['issues-watched-local', ids],
     queryFn: () => redmineApi.getIssuesByIds(ids),
-    refetchInterval: 90 * 1000,
+    refetchInterval: useIssueRefetchInterval(90 * 1000),
     refetchIntervalInBackground: true,
   });
 }
@@ -270,7 +289,7 @@ export function useIssuesByIds(ids: number[]) {
     queryKey: ['issues-by-ids', [...ids].sort((a, b) => a - b)],
     queryFn: () => redmineApi.getIssuesByIds(ids),
     enabled: ids.length > 0,
-    refetchInterval: 90 * 1000,
+    refetchInterval: useIssueRefetchInterval(90 * 1000),
   });
 }
 
@@ -286,7 +305,7 @@ export function useToReviewIssues() {
   return useQuery({
     queryKey: ['issues-to-review'],
     queryFn: redmineApi.getToReviewIssues,
-    refetchInterval: 90 * 1000,
+    refetchInterval: useIssueRefetchInterval(90 * 1000),
     refetchIntervalInBackground: true,
   });
 }
@@ -645,7 +664,7 @@ export function useMentions() {
   return useQuery({
     queryKey: ['issues-mentions'],
     queryFn: redmineApi.getMentions,
-    refetchInterval: 2 * 60 * 1000,
+    refetchInterval: useIssueRefetchInterval(2 * 60 * 1000),
     refetchIntervalInBackground: true,
   });
 }

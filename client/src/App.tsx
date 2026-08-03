@@ -25,6 +25,7 @@ import { getAIKey, migrateLegacyAIKeys } from './utils/aiConfig';
 import { migrateLegacyADCreds } from './utils/adConfig';
 import { migrateLegacyTotp } from './api/totp';
 import { refreshSecretsStatus, resetSecretsStatus } from './utils/secretsStatus';
+import { useIssueStream } from './hooks/useIssueStream';
 import { useActivityNotifications } from './hooks/useActivityNotifications';
 import { useMailNotifications } from './hooks/useMailNotifications';
 import { useWorkflowNotifications } from './hooks/useWorkflowNotifications';
@@ -405,6 +406,11 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   });
 
   const { theme, toggle: toggleTheme } = useTheme();
+  // Canal de avisos do servidor. Enquanto ele estiver de pé, as queries de
+  // tarefas afrouxam o intervalo (ver useIssueRefetchInterval) — o servidor já
+  // varre o Redmine para o Web Push e agora avisa em vez de o cliente varrer de
+  // novo por conta própria.
+  useIssueStream(true);
   const monitored = useMonitoredIssues();
   const authored = useAuthoredIssues();
   const watched = useWatchedIssues();
