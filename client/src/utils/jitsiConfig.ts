@@ -1,21 +1,27 @@
 // Configuração da integração com Jitsi Meet (War Room).
-// O domínio é configurável via localStorage para facilitar testes/ambientes,
-// mas o padrão é o servidor da B2Click.
+//
+// Precedência do domínio:
+//   1. VITE_JITSI_DOMAIN definido no build → fixo, ignora o localStorage
+//      (a organização definiu o servidor; ajuste local não pode sobrepor).
+//   2. localStorage → escape para testes/ambientes quando não há valor de build.
+//   3. '' → sem servidor configurado; a UI de chamada não deve ser oferecida.
+import { appDefaults } from './appDefaults';
 
 const DOMAIN_KEY = 'rk_jitsi_domain';
-const DEFAULT_DOMAIN = 'meet.b2click.com';
 
 // Prefixo usado nas salas para evitar colisão com outras instâncias do Jitsi.
 const ROOM_PREFIX = 'B2Click';
 
 export function getJitsiDomain(): string {
+  const fixed = appDefaults.jitsiDomain;
+  if (fixed.locked) return fixed.value;
   try {
     const v = localStorage.getItem(DOMAIN_KEY);
     if (v && v.trim()) return v.trim();
   } catch {
     /* ignore */
   }
-  return DEFAULT_DOMAIN;
+  return '';
 }
 
 export function setJitsiDomain(domain: string) {

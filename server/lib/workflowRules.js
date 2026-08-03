@@ -287,10 +287,21 @@ function scheduleDue(state, trigger, now = new Date()) {
 
 // ── varredura ───────────────────────────────────────────────────────────────
 // Tarefas no escopo. scope: 'assigned' | 'review' | 'monitored' | 'all'.
+// 'all' é a união de assigned/review/monitored — NÃO inclui `seen.authored`
+// (tarefas que você só criou, sem estar atribuída/revisão/monitorada): isso é dado
+// extra que o `issues` Map carrega só para o gatilho "Criada por mim" categorizar;
+// incluir em "all" mudaria silenciosamente o escopo de varreduras já existentes.
 function scanIssues(issuesData, scope) {
   if (!issuesData) return [];
   const { issues, seen } = issuesData;
-  if (!scope || scope === 'all') return [...issues.values()];
+  if (!scope || scope === 'all') {
+    const ids = new Set([
+      ...(seen.assigned || []),
+      ...(seen.review || []),
+      ...(seen.monitored || []),
+    ]);
+    return [...issues.values()].filter((i) => ids.has(i.id));
+  }
   const ids = new Set(seen[scope] || []);
   return [...issues.values()].filter((i) => ids.has(i.id));
 }

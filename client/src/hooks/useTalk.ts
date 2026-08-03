@@ -5,6 +5,7 @@ import {
   sendMessage,
   fetchTalkMe,
   getTalkAuth,
+  cacheTalkUid,
   editMessage,
   deleteMessage,
   deleteMessageAttachment,
@@ -15,7 +16,13 @@ import {
   fetchUserStatuses,
   fetchRedmineTalkMatch,
 } from '../api/talk';
-import type { TalkMessage, TalkRoom, UserStatus, RedmineTalkMatch } from '../api/talk';
+import type {
+  TalkMessage,
+  TalkRoom,
+  UserStatus,
+  RedmineTalkMatch,
+  TalkParticipant,
+} from '../api/talk';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { talkRead } from '../utils/talkRead';
 
@@ -23,12 +30,23 @@ function talkEnabled() {
   return !!getTalkAuth();
 }
 
+// Quem sou eu no Talk. Diferente das outras queries daqui, esta NÃO tinha
+// refetchInterval e usava staleTime: Infinity — ou seja, uma única falha (o
+// retry global é 1) deixava `me` indefinido pelo resto da sessão, e o `myId`
+// caía num fallback que nunca casa com o actorId. Resultado: todas as minhas
+// mensagens renderizavam como se fossem do outro lado. Daí o cache em disco e a
+// revalidação.
 export function useTalkCurrentUser() {
   return useQuery({
     queryKey: ['talk-me'],
-    queryFn: fetchTalkMe,
+    queryFn: async () => {
+      const me = await fetchTalkMe();
+      if (me?.id) cacheTalkUid(me.id);
+      return me;
+    },
     enabled: talkEnabled(),
-    staleTime: Infinity,
+    staleTime: 30 * 60_000,
+    retry: 3,
   });
 }
 
@@ -170,6 +188,10 @@ export function useSendMessage(token: string | null, myId = '', myName = '') {
     },
     // Sucesso: troca a bolha temporária pela mensagem real (sem flicker nem duplicata)
     onSuccess: (data, _v, ctx) => {
+      // A resposta do POST traz o actorId com que o servidor gravou a mensagem —
+      // é a prova definitiva de quem eu sou no Talk. Aproveita para corrigir o
+      // cache caso /talk/me esteja indisponível ou tenha ficado defasado.
+      if (data?.actorId) cacheTalkUid(data.actorId);
       if (ctx) {
         qc.setQueryData(['talk-messages', token], (old: TalkMessage[] = []) => {
           if (!data?.id) return old.filter((m) => m.id !== ctx.clientId);
@@ -296,16 +318,40 @@ export function useUserStatuses() {
 export function useTalkRedmineMatch() {
   return useQuery({
     queryKey: ['talk-redmine-match'],
-    queryFn: fetchRedmineTalkMatch,
+    queryFn: () => fetchRedmineTalkMatch(),
     enabled: talkEnabled(),
     staleTime: 60 * 60 * 1000,
+  });
+}
+
+// Força reconstruir o vínculo Redmine↔Talk agora (ignora o cache de 24h do servidor)
+// e já atualiza o cache do React Query — sem isso, quem clicasse "atualizar" continuaria
+// vendo os dados antigos por até 1h (staleTime), mesmo com o servidor já atualizado.
+export function useRefreshTalkRedmineMatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => fetchRedmineTalkMatch(true),
+    onSuccess: (data) => qc.setQueryData(['talk-redmine-match'], data),
   });
 }
 
 export function useTalkMatchFor(redmineId?: number): RedmineTalkMatch | undefined {
   const { data } = useTalkRedmineMatch();
   if (!redmineId || !data) return undefined;
-  return data.byRedmineId[String(redmineId)];
+  // Defensivo: uma resposta em cache de uma versão anterior (ou de um erro transitório
+  // do servidor) pode não ter esse campo — não deixa a UI inteira quebrar por isso.
+  return data.byRedmineId?.[String(redmineId)];
+}
+
+// Caminho inverso: dado o usuário do Talk (ncUid), acha o id dele no Redmine —
+// usado pelo pop-up de perfil do Talk pra linkar de volta pra pessoa no Redmine.
+export function useRedmineIdForNcUid(ncUid?: string): number | undefined {
+  const { data } = useTalkRedmineMatch();
+  if (!ncUid || !data) return undefined;
+  // Cache em disco de uma versão anterior (antes do byNcUid existir) pode não ter
+  // o campo — o servidor detecta e reconstrói, mas defende contra a resposta velha
+  // que ainda pode estar em memória/cache do react-query no meio da transição.
+  return data.byNcUid?.[ncUid];
 }
 
 export function useSearchNCUsers(query: string) {
@@ -374,6 +420,9 @@ export function useTalkSSE(token: string | null, initialMessageId: number) {
     Array<{ actorId: string; actorDisplayName: string }>
   >([]);
   const typingTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  // Estado real da conexão SSE, exposto para o indicador "Conectado/Sem conexão".
+  // Começa true para não piscar "sem conexão" no primeiro render, antes do onopen.
+  const [connected, setConnected] = useState(true);
 
   // Booleano como dep: SSE só (re)inicia quando passa de 0 para >0, evita restart a cada mensagem.
   const active = initialMessageId > 0;
@@ -434,14 +483,14 @@ export function useTalkSSE(token: string | null, initialMessageId: number) {
         if (hadNew) {
           qc.invalidateQueries({ queryKey: ['talk-rooms'] });
           // Atualiza o lastReadMessage otimisticamente (quem enviou a msg com certeza já leu tudo até ali)
-          qc.setQueryData(['talk-participants', token], (old: any) => {
+          qc.setQueryData(['talk-participants', token], (old: TalkParticipant[] | undefined) => {
             if (!old) return old;
             const maxIds = new Map<string, number>();
             for (const m of msgs) {
               const current = maxIds.get(m.actorId) ?? 0;
               if (m.id > current) maxIds.set(m.actorId, m.id);
             }
-            return old.map((p: any) => {
+            return old.map((p) => {
               const maxId = maxIds.get(p.actorId);
               if (maxId && maxId > (p.lastReadMessage ?? 0)) {
                 return { ...p, lastReadMessage: maxId };
@@ -461,9 +510,9 @@ export function useTalkSSE(token: string | null, initialMessageId: number) {
         const msgs = qc.getQueryData<TalkMessage[]>(['talk-messages', token]);
         const latestId = msgs && msgs.length > 0 ? msgs[0].id : 0;
         if (latestId > 0) {
-          qc.setQueryData(['talk-participants', token], (old: any) => {
+          qc.setQueryData(['talk-participants', token], (old: TalkParticipant[] | undefined) => {
             if (!old) return old;
-            return old.map((p: any) => {
+            return old.map((p) => {
               if (
                 users.some((u) => u.actorId === p.actorId) &&
                 latestId > (p.lastReadMessage ?? 0)
@@ -495,17 +544,27 @@ export function useTalkSSE(token: string | null, initialMessageId: number) {
       }
     };
 
+    sse.onopen = () => setConnected(true);
+
     sse.onerror = () => {
-      // EventSource reconecta automaticamente; sem ação necessária.
+      // EventSource reconecta sozinho; só refletimos a queda na UI. Quando a
+      // reconexão vinga, o onopen acima volta o indicador para "conectado".
+      setConnected(false);
     };
 
+    // Captura o Map agora: no cleanup, ler typingTimers.current de novo poderia
+    // pegar outro objeto e deixar os timers deste efeito rodando soltos.
+    const timers = typingTimers.current;
     return () => {
       sse.close();
-      typingTimers.current.forEach((t) => clearTimeout(t));
-      typingTimers.current.clear();
+      timers.forEach((t) => clearTimeout(t));
+      timers.clear();
       setTypingUsers([]);
     };
-  }, [token, active]); // active é booleano: muda só 1x (0→>0), nunca reinicia por nova mensagem
+    // initialMessageId fica fora de propósito: só o booleano `active` entra como
+    // dep, senão o SSE reiniciaria a cada mensagem nova. `qc` é estável.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, active]);
 
-  return { typingUsers };
+  return { typingUsers, connected };
 }

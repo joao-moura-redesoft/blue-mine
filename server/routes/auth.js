@@ -55,6 +55,13 @@ router.post(
       if (error.response && [401, 403].includes(error.response.status)) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
+      // A guarda de credencial recusa localmente quando ESTA senha já foi
+      // reprovada (evita repetir login falho no AD e bloquear a conta). Aqui,
+      // porém, o usuário está justamente tentando entrar: a resposta certa é a
+      // de credencial inválida, não o aviso de "saia e entre de novo".
+      if (error.credentialsStale) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
       throw error;
     }
   }),

@@ -9,8 +9,12 @@
 const axios = require('axios');
 const { getMyUserId } = require('./lib/redmine');
 const { getAd } = require('./services/secretsStore');
+const { getInternalCaAgent } = require('./lib/internalCa');
+const AppError = require('./lib/AppError');
 
-const DEFAULT_HOST = process.env.DOKUWIKI_HOST || 'wiki.redesoft.com.br';
+// Mesmo endereço que o frontend embute no build (VITE_DOKUWIKI_HOST, no .env da
+// raiz). DOKUWIKI_HOST continua aceito para não quebrar instalações antigas.
+const DEFAULT_HOST = process.env.VITE_DOKUWIKI_HOST || process.env.DOKUWIKI_HOST || '';
 
 // Credenciais AD por-usuário (sem estado global): no login usuário/senha vêm da
 // sessão (x-redmine-*, injetadas pela authMiddleware); no login por API key, do
@@ -19,6 +23,12 @@ const DEFAULT_HOST = process.env.DOKUWIKI_HOST || 'wiki.redesoft.com.br';
 // confiar num header x-wiki-host.
 async function resolveWikiCreds(req) {
   const host = DEFAULT_HOST;
+  if (!host) {
+    throw new AppError(
+      503,
+      'Wiki não configurada. Defina DOKUWIKI_HOST no .env antes de gerar o build.',
+    );
+  }
   let user = req.headers['x-redmine-user'] || '';
   let pass = req.headers['x-redmine-pass'] || '';
   if (!user || !pass) {
@@ -41,17 +51,18 @@ function basicAuth(user, pass) {
   return { Authorization: `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}` };
 }
 
-async function dokuGet(host, user, pass, path) {
+async function dokuGet(host, user, pass, path, timeout = 8000) {
   if (!user || !pass)
     throw Object.assign(new Error('credentials_required'), { code: 'WIKI_NO_CREDS' });
   const url = `https://${host}${path}`;
   const { data } = await axios.get(url, {
     headers: { ...basicAuth(user, pass) },
-    timeout: 8000,
+    timeout,
     // Host fixo (DEFAULT_HOST) + sem seguir redirect: impede que um open-redirect
     // no wiki desvie a requisição autenticada para um IP interno (anti-SSRF).
     // export_xhtmlbody/search do DokuWiki respondem 200 direto, sem redirect.
     maxRedirects: 0,
+    ...(getInternalCaAgent() ? { httpsAgent: getInternalCaAgent() } : {}),
   });
   return data;
 }
@@ -128,7 +139,16 @@ function rewriteLinks(html, host) {
 
 async function searchPages(req, q) {
   const { host, user, pass } = await resolveWikiCreds(req);
-  const html = await dokuGet(host, user, pass, `/doku.php?do=search&q=${encodeURIComponent(q)}`);
+  // Busca full-text sem índice (padrão do DokuWiki) varre página por página —
+  // pode legitimamente demorar mais que uma leitura de página única, então usa
+  // um timeout maior que o padrão de dokuGet.
+  const html = await dokuGet(
+    host,
+    user,
+    pass,
+    `/doku.php?do=search&q=${encodeURIComponent(q)}`,
+    20000,
+  );
   return parseSearchHTML(html);
 }
 

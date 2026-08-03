@@ -62,7 +62,7 @@ export function TriageLayer({
 
       {triage.showHelp && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+          className="fixed inset-0 z-[60] flex items-center justify-center modal-backdrop p-4"
           onClick={() => triage.setShowHelp(false)}
         >
           <div

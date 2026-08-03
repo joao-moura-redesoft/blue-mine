@@ -271,7 +271,7 @@ export function MeView({ onIssueClick }: Props) {
         <div className="flex items-center justify-center py-20 text-slate-400">
           <Loader2 size={24} className="animate-spin" />
         </div>
-      ) : q.isError || !q.data ? (
+      ) : q.isError || !q.data?.kpis ? (
         <div className="text-center py-16 text-slate-500">
           Não consegui carregar seu desempenho. Tente atualizar.
         </div>

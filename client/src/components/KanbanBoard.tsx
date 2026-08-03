@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import {
   DndContext,
@@ -8,7 +8,6 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-  useDroppable,
 } from '@dnd-kit/core';
 import {
   Plus,
@@ -28,8 +27,6 @@ import {
   Flag,
   Milestone,
   CalendarClock,
-  Play,
-  Square,
   GripHorizontal,
   Palette,
   Layers,
@@ -55,12 +52,19 @@ import type { Version } from '../types/redmine';
 import { SavedFiltersBar } from './SavedFiltersBar';
 import type { SavedFilter } from '../utils/savedFilters';
 import { IssueCard } from './IssueCard';
-import { CreateIssueModal } from './CreateIssueModal';
 import type { Issue, IssueStatus } from '../types/redmine';
 import { getMissingFields, getReviewAlert } from '../utils/alerts';
 import { KanbanBoardSkeleton, SkeletonBox } from './Skeletons';
 
 import { loadArchived, saveArchived } from '../utils/archive';
+import { errorList } from '../utils/httpError';
+
+// Lazy: enquanto este import era estático, o módulo voltava para o chunk
+// principal e anulava o lazy() do App.tsx — o Vite avisa no build com
+// "dynamic import will not move module into another chunk".
+const CreateIssueModal = lazy(() =>
+  import('./CreateIssueModal').then((m) => ({ default: m.CreateIssueModal })),
+);
 
 type SortBy = 'priority' | 'due_date' | 'updated';
 type GroupBy = 'none' | 'assignee' | 'priority';
@@ -507,13 +511,6 @@ function KanbanColumn({
       }
     : {};
 
-  const bodyStyle = customTheme
-    ? {
-        backgroundColor: isOver ? customTheme.hex + '1a' : customTheme.hex + '08', // 10% opacidade no drag over, 3% normal
-        borderColor: customTheme.hex + '40',
-      }
-    : {};
-
   return (
     <div
       ref={setNodeRef}
@@ -831,7 +828,7 @@ export function KanbanBoard({
     try {
       const saved = localStorage.getItem('kanban-column-colors');
       if (saved) return JSON.parse(saved);
-    } catch (e) {}
+    } catch {}
     return {};
   });
 
@@ -843,7 +840,7 @@ export function KanbanBoard({
     try {
       const saved = localStorage.getItem('kanban-pinned-statuses');
       if (saved) return new Set(JSON.parse(saved));
-    } catch (e) {}
+    } catch {}
     return new Set();
   });
   const [archivedIds, setArchivedIds] = useState<Set<number>>(loadArchived);
@@ -855,7 +852,7 @@ export function KanbanBoard({
     try {
       const saved = localStorage.getItem('kanban-column-order');
       if (saved) return JSON.parse(saved);
-    } catch (e) {}
+    } catch {}
     return [];
   });
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -868,7 +865,7 @@ export function KanbanBoard({
     try {
       const s = localStorage.getItem('kanban-wip-limits');
       if (s) return JSON.parse(s);
-    } catch (e) {}
+    } catch {}
     return {};
   });
   const [groupBy, setGroupBy] = useState<GroupBy>(
@@ -916,8 +913,14 @@ export function KanbanBoard({
       window.removeEventListener('mouseup', onMouseUp);
     };
 
-    // Suprime o contextmenu só se houve movimento real
-    const suppressCtx = (e: Event) => e.preventDefault();
+    // Suprime o contextmenu só se houve movimento real. Antes o preventDefault
+    // era incondicional (e `moved` ficava sem uso), então o botão direito nunca
+    // abria menu nenhum no board — nem num clique parado, sem arraste.
+    const suppressCtx = (e: Event) => {
+      if (!moved) return;
+      e.preventDefault();
+      moved = false;
+    };
 
     el.addEventListener('mousedown', onMouseDown);
     el.addEventListener('contextmenu', suppressCtx);
@@ -1254,8 +1257,8 @@ export function KanbanBoard({
     updateStatus.mutate(
       { id: issueId, statusId: targetStatusId },
       {
-        onError: (err: any) => {
-          const detail = err?.response?.data?.errors?.join(', ');
+        onError: (err: unknown) => {
+          const detail = errorList(err)?.join(', ');
           setDragError(
             detail ||
               'Não foi possível mover a tarefa. Verifique as permissões de workflow no Redmine.',
@@ -1879,7 +1882,14 @@ export function KanbanBoard({
         </div>
       )}
 
-      {showCreate && <CreateIssueModal onClose={() => setShowCreate(false)} />}
+      <Suspense fallback={null}>
+        {showCreate && (
+          <CreateIssueModal
+            onClose={() => setShowCreate(false)}
+            onCreated={(id) => onIssueClick(id)}
+          />
+        )}
+      </Suspense>
     </div>
   );
 }

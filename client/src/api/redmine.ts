@@ -117,10 +117,34 @@ const api = axios.create({
   withCredentials: true,
 });
 
+// Motivo do último logout automático, para a tela de login explicar o que houve
+// em vez de simplesmente reaparecer do nada (o caso comum é senha de rede
+// trocada, com a sessão ainda guardando a antiga).
+const LOGOUT_REASON_KEY = 'rk_logout_reason';
+
+export function takeLogoutReason(): string | null {
+  try {
+    const v = sessionStorage.getItem(LOGOUT_REASON_KEY);
+    if (v) sessionStorage.removeItem(LOGOUT_REASON_KEY);
+    return v;
+  } catch {
+    return null;
+  }
+}
+
 api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
+      try {
+        sessionStorage.setItem(
+          LOGOUT_REASON_KEY,
+          err.response?.data?.error ||
+            'Sua sessão expirou. Se você trocou a senha de rede, entre com a nova.',
+        );
+      } catch {
+        /* sem sessionStorage: segue sem explicação, o logout ainda acontece */
+      }
       window.dispatchEvent(new Event('auth-expired'));
     }
     return Promise.reject(err);

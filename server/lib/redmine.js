@@ -1,5 +1,7 @@
 // Cliente Redmine por request + credenciais e cache de userId.
 const axios = require('axios');
+const { getInternalCaAgent } = require('./internalCa');
+const { assertNotKnownBad, recordFailure, recordSuccess } = require('./credentialGuard');
 
 const DEFAULT_URL = '';
 const DEFAULT_KEY = '';
@@ -19,10 +21,43 @@ function makeRedmine(req) {
   const key = req.headers['x-redmine-key'] || DEFAULT_KEY;
   const username = req.headers['x-redmine-user'] || '';
   const password = req.headers['x-redmine-pass'] || '';
-  return axios.create({
+  const agent = getInternalCaAgent();
+
+  // Modo usuário/senha = a senha do AD. Se ela já foi recusada, nem tenta: o app
+  // faz polling constante e cada tentativa é um login falho no domínio, o que
+  // acaba bloqueando a conta. Ver credentialGuard.js.
+  const usingPassword = !!(username && password);
+  if (usingPassword) assertNotKnownBad('redmine', username, password);
+
+  const client = axios.create({
     baseURL: url,
     headers: { ...buildAuthHeaders(key, username, password), 'Content-Type': 'application/json' },
+    // Sem isso, uma conexão que trava na rede (proxy corporativo engolindo pacotes
+    // em vez de resetar) fica pendurada para sempre — e como o motor de automações
+    // roda um tick de cada vez (`running` lock), UM request assim trava TODOS os
+    // gatilhos de TODOS os usuários indefinidamente, sem log nenhum.
+    timeout: 20000,
+    ...(agent ? { httpsAgent: agent } : {}),
   });
+
+  client.interceptors.response.use(
+    (res) => {
+      if (usingPassword) recordSuccess('redmine', username);
+      return res;
+    },
+    (err) => {
+      // 401 do Redmine com usuário/senha = credencial vencida (senha trocada no
+      // AD). 403 é "sem permissão" — a key não-admin toma 403 o tempo todo em
+      // rotas legítimas, e tratar isso como senha errada deslogaria à toa.
+      if (usingPassword && err.response?.status === 401) {
+        recordFailure('redmine', username, password);
+        err.credentialsStale = true;
+      }
+      return Promise.reject(err);
+    },
+  );
+
+  return client;
 }
 
 // Cache de userId por "url:key" ou "url:user:pass". Com TTL para não crescer

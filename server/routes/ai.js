@@ -24,6 +24,7 @@ async function gateOrExec(name, args, ctx, pendingActions) {
   return execChatTool(name, args, ctx);
 }
 const { makeRedmine, buildAuthHeaders, getMyUserId } = require('../lib/redmine');
+const { getInternalCaAgent } = require('../lib/internalCa');
 const handle = require('../lib/handle');
 const { createRateLimiter } = require('../middleware/rateLimit');
 const {
@@ -847,7 +848,12 @@ router.post(
         try {
           const resp = await axios.get(
             `${redmineUrl}/attachments/download/${att.id}/${encodeURIComponent(att.filename)}`,
-            { headers: redmineAuthHeaders, responseType: 'text', maxContentLength: 80 * 1024 },
+            {
+              headers: redmineAuthHeaders,
+              responseType: 'text',
+              maxContentLength: 80 * 1024,
+              ...(getInternalCaAgent() ? { httpsAgent: getInternalCaAgent() } : {}),
+            },
           );
           textContents.push({ filename: att.filename, content: resp.data.slice(0, 4000) });
         } catch (e) {
@@ -1037,8 +1043,7 @@ router.post(
         .json({ error: 'Nenhuma chave de IA configurada (Configurações → IA)' });
 
     const { text, target } = req.body || {};
-    if (!text || !String(text).trim())
-      return res.status(400).json({ error: 'text obrigatório' });
+    if (!text || !String(text).trim()) return res.status(400).json({ error: 'text obrigatório' });
 
     const translation = await aiComplete(provider, key, {
       uid,
@@ -1064,8 +1069,7 @@ router.post(
         .json({ error: 'Nenhuma chave de IA configurada (Configurações → IA)' });
 
     const { context, tone, draft } = req.body || {};
-    if (!context && !draft)
-      return res.status(400).json({ error: 'context ou draft obrigatório' });
+    if (!context && !draft) return res.status(400).json({ error: 'context ou draft obrigatório' });
 
     // Anti prompt-injection: o contexto é conteúdo de terceiros. Instrui o modelo a
     // NÃO obedecer instruções contidas nas mensagens — só usá-las como contexto.
@@ -1082,7 +1086,9 @@ router.post(
 
     try {
       const parsed = JSON.parse(result);
-      res.json({ suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.slice(0, 3) : [] });
+      res.json({
+        suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.slice(0, 3) : [],
+      });
     } catch {
       // Fallback: quebra por linhas se o modelo não devolveu JSON.
       const lines = String(result || '')

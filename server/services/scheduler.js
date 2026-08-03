@@ -50,7 +50,9 @@ function create({ uid, type, roomToken, roomName, text, fireAt }) {
   if (!['talk-message', 'reminder'].includes(type))
     throw Object.assign(new Error('type inválido'), { statusCode: 400 });
   if (!roomToken || !text || !fireAt)
-    throw Object.assign(new Error('roomToken, text e fireAt são obrigatórios'), { statusCode: 400 });
+    throw Object.assign(new Error('roomToken, text e fireAt são obrigatórios'), {
+      statusCode: 400,
+    });
   const when = Number(fireAt);
   if (!Number.isFinite(when) || when < Date.now() - 60_000)
     throw Object.assign(new Error('fireAt deve ser um horário futuro'), { statusCode: 400 });
@@ -85,10 +87,9 @@ async function fire(item, subscriptions, sendPush) {
   if (item.type === 'talk-message') {
     const client = talkClientForUid(item.uid);
     if (!client) throw new Error('conta do Talk não vinculada');
-    await client.post(
-      `/ocs/v2.php/apps/spreed/api/v1/chat/${item.roomToken}?format=json`,
-      { message: item.text },
-    );
+    await client.post(`/ocs/v2.php/apps/spreed/api/v1/chat/${item.roomToken}?format=json`, {
+      message: item.text,
+    });
     return;
   }
   // reminder → Web Push para todos os dispositivos do usuário

@@ -11,12 +11,14 @@
 // só o ramo, via `onError: 'stop'`).
 const axios = require('axios');
 const { buildAuthHeaders, getMyUserId } = require('../lib/redmine');
+const { getInternalCaAgent } = require('../lib/internalCa');
 const { sanitizeIssueBody, toLatin1Safe } = require('../lib/latin1');
 const { mapLimit } = require('../lib/pagination');
 const { safeAgents } = require('../lib/ssrfGuard');
 const keyboard = require('./keyboardNotify');
 const soundNotify = require('./soundNotify');
 const talkStore = require('./talkStore');
+const talkMatch = require('./talkMatch');
 const zimbra = require('../zimbra');
 const { resolveInput } = require('../lib/variableResolver');
 const {
@@ -31,6 +33,8 @@ const {
   nextFailStreak,
   waitMs,
   localYmd,
+  daysSince,
+  daysUntil,
 } = require('../lib/workflowRules');
 const { listWorkflows, saveWorkflows } = require('./workflowStore');
 const { getState, saveState } = require('./workflowState');
@@ -39,6 +43,7 @@ const { generateTOTP } = require('../lib/totp');
 const workflowRuns = require('./workflowRuns');
 const ai = require('./ai');
 const { providerFor } = require('./digest');
+const logger = require('../lib/logger');
 
 const ISSUE_TRIGGERS = ['issue.created', 'issue.status_changed', 'issue.assigned_changed'];
 
@@ -48,9 +53,25 @@ const BOOT_TS = Date.now();
 
 // ── entrada do loop ─────────────────────────────────────────────────────────
 let running = false;
+// Menor que WORKFLOW_POLL_MS (60s padrão): se uma requisição travar na rede sem
+// dar erro (proxy corporativo engolindo pacotes em vez de resetar a conexão),
+// `running` ficava travado em `true` para sempre — nenhum gatilho de nenhum
+// usuário rodava de novo, sem NENHUM log (a promise nunca resolve nem rejeita).
+// O watchdog libera o lock mesmo que o tick travado nunca termine; não cancela a
+// requisição pendurada (não temos AbortController nesses clients), só evita que
+// ela derrube o motor inteiro para sempre.
+const TICK_WATCHDOG_MS = 55 * 1000;
 async function tick(subscriptions, sendPush) {
   if (running) return;
   running = true;
+  let watchdogFired = false;
+  const watchdog = setTimeout(() => {
+    watchdogFired = true;
+    logger.error('workflow_tick_watchdog', {
+      detail: `tick não terminou em ${TICK_WATCHDOG_MS}ms — provável requisição de rede pendurada; liberando o lock`,
+    });
+    running = false;
+  }, TICK_WATCHDOG_MS);
   try {
     const byUid = await collectRunners(subscriptions);
     if (byUid.size === 0) return;
@@ -58,11 +79,19 @@ async function tick(subscriptions, sendPush) {
       try {
         await tickUser(uid, rec, sendPush, subscriptions);
       } catch (e) {
-        console.warn('[workflow] uid', uid, 'falhou:', e.response?.status || e.message);
+        // Uma exceção aqui pula o tick INTEIRO deste usuário — todos os workflows dele,
+        // não só o que falhou por acaso. É a causa mais comum de "gatilho nunca dispara"
+        // sem nenhum registro no Histórico (o erro nunca chega no runGraph/recordRun).
+        logger.warn('workflow_tick_failed', {
+          uid,
+          status: e.response?.status,
+          detail: e.response?.data || e.message,
+        });
       }
     }
   } finally {
-    running = false;
+    clearTimeout(watchdog);
+    if (!watchdogFired) running = false;
   }
 }
 
@@ -88,8 +117,15 @@ async function collectRunners(subscriptions) {
       let uid;
       try {
         uid = await getMyUserId(reqShim(rec));
-      } catch {
-        continue; // credencial inválida/offline — ignora esta sessão
+      } catch (e) {
+        // credencial inválida/offline — ignora esta sessão (mas loga: se for rede/TLS
+        // instável, isso explica gatilhos "schedule" que parecem não disparar).
+        logger.warn('workflow_session_skipped', {
+          url: s.url,
+          status: e.response?.status,
+          detail: e.response?.data || e.message,
+        });
+        continue;
       }
       if (uid && !byUid.has(uid)) {
         rec.uid = uid;
@@ -97,7 +133,7 @@ async function collectRunners(subscriptions) {
       }
     }
   } catch (e) {
-    console.warn('[workflow] falha ao listar sessões:', e.message);
+    logger.warn('workflow_list_sessions_failed', { detail: e.message });
   }
   return byUid;
 }
@@ -497,9 +533,11 @@ function detectIssueEvents(state, issues, seen) {
   const next = {};
   let changed = firstRun;
 
-  // Categoria (assigned/review/monitored) da issue, para o gatilho issue.created.
+  // Categoria (assigned/review/monitored/authored) da issue, para o gatilho issue.created.
+  // Prioridade: se caiu em mais de uma (ex.: criei E atribuí a mim mesmo), "assigned"
+  // vence — bate com a intuição de "recebida" quando a tarefa está comigo hoje.
   const category = {};
-  for (const c of ['assigned', 'review', 'monitored']) {
+  for (const c of ['assigned', 'review', 'monitored', 'authored']) {
     for (const id of seen[c] || []) if (!category[id]) category[id] = c;
   }
 
@@ -615,6 +653,7 @@ async function detectTalkEvents(state, uid) {
     baseURL: auth.url,
     auth: { username: auth.user, password: auth.token },
     headers: { 'OCS-APIRequest': 'true', Accept: 'application/json' },
+    ...(getInternalCaAgent() ? { httpsAgent: getInternalCaAgent() } : {}),
   });
   const { data } = await client.get('/ocs/v2.php/apps/spreed/api/v4/room?format=json');
 
@@ -715,6 +754,25 @@ async function runGraph(
 ) {
   const nodeById = new Map(w.nodes.map((n) => [n.id, n]));
   const visited = new Set();
+
+  // Espelha em {{ }} os mesmos campos derivados que as condições já calculam
+  // (issue.updated_days/created_days/due_days — ver fieldValue em workflowRules.js),
+  // pra dar pra escrever "parada há {{issue.updated_days}} dias" numa mensagem sem
+  // precisar de outro nó só pra isso. Clona (não muta) `issue`: o objeto é
+  // compartilhado com o cache de snapshot do motor (detectIssueEvents) e outras
+  // tarefas na mesma varredura. Recalcula a cada entrada em runGraph (inclusive ao
+  // retomar de um nó Espera) pra não ficar com valor congelado de antes da espera.
+  if (ctx.issue) {
+    ctx = {
+      ...ctx,
+      issue: {
+        ...ctx.issue,
+        updated_days: daysSince(ctx.issue.updated_on),
+        created_days: daysSince(ctx.issue.created_on),
+        due_days: daysUntil(ctx.issue.due_date),
+      },
+    };
+  }
 
   // Rastro da execução: nodeId → desfecho, para pintar o caminho no canvas.
   // 'ok'/'passed'/'true' = seguiu; 'error' = falhou; 'stopped'/'false' = parou/
@@ -858,6 +916,45 @@ async function execAction(node, ctx, rec, sendPush, subscriptions, { test } = {}
         message: cfg.message || '',
       });
       return;
+    case 'talk.notify_person': {
+      const targetId = await resolveTalkTargetAsync(cfg, ctx, rec);
+      if (!targetId) return { matched: false };
+
+      // Avisar a si mesmo: abrir uma DM consigo no Talk não faz sentido (e pode nem
+      // funcionar). Manda push (igual à ação "notify") e registra na sala "Nota para
+      // si mesmo" do Nextcloud, que já existe por padrão pra todo usuário do Talk.
+      if (String(targetId) === String(rec.uid)) {
+        const recs = pushRecsFor(rec, subscriptions);
+        if (recs.length === 0) {
+          console.warn('[workflow] talk.notify_person (self): sem inscrição push p/ uid', rec.uid);
+        }
+        for (const r of recs) {
+          await sendPush(r, { title: 'Aviso da automação', body: cfg.message || '' });
+        }
+        const selfToken = await talkStore.selfNoteRoomToken(rec.uid);
+        if (selfToken) await talkStore.sendTalkMessage(rec.uid, selfToken, cfg.message || '');
+        return { matched: true, self: true, sent: !!selfToken };
+      }
+
+      const matches = await talkMatch.getMatches(rec.uid, redmineClient(rec));
+      const m = matches.byRedmineId?.[String(targetId)];
+      if (!m?.ncUid) {
+        console.warn(
+          '[workflow] talk.notify_person: sem vínculo Talk p/ usuário Redmine',
+          targetId,
+        );
+        return { matched: false };
+      }
+      const token = await talkStore.createDMAs(rec.uid, m.ncUid);
+      if (!token) {
+        // Mesma restrição de grupo/visibilidade do Nextcloud que afeta o app (ver
+        // [[talk-redmine-name-match]]): sabemos quem é, mas essa conta não pode
+        // iniciar conversa com ela.
+        return { matched: true, sent: false, ncName: m.ncName };
+      }
+      await talkStore.sendTalkMessage(rec.uid, token, cfg.message || '');
+      return { matched: true, sent: true, ncName: m.ncName };
+    }
     case 'issue.update': {
       const id = ctx.issue?.id;
       if (!id) return;
@@ -1241,6 +1338,39 @@ async function httpWithRetry(config) {
   }
 }
 
+// Resolve o id do usuário Redmine alvo da ação talk.notify_person. `ctx.issue` traz
+// assigned_to/author sempre (campos padrão do Redmine, não exigem include= especial).
+function resolveTalkTarget(who, ctx, fixedUserId) {
+  if (who === 'author') return ctx.issue?.author?.id ?? null;
+  if (who === 'fixed') return fixedUserId ? Number(fixedUserId) : null;
+  return ctx.issue?.assigned_to?.id ?? null; // 'assigned_to' é o padrão
+}
+
+// Variante async: cobre também `who: 'custom_field'` (ex.: Revisor, Desenvolvedor).
+// Diferente de assigned_to/author, o snapshot usado pelos gatilhos (issue.scan,
+// issue.created, ...) vem da LISTAGEM de tarefas, que o Redmine não inclui
+// custom_fields por padrão — por isso rebusca a tarefa individualmente (que já vem
+// com custom_fields, sem precisar de include=) só quando esse "who" é usado. Fazer
+// isso sempre para todo mundo seria caro (mais um GET por tarefa a cada tick).
+async function resolveTalkTargetAsync(cfg, ctx, rec) {
+  if (cfg.who !== 'custom_field') return resolveTalkTarget(cfg.who, ctx, cfg.userId);
+  const issueId = ctx.issue?.id;
+  if (!issueId || !cfg.customFieldId) return null;
+  try {
+    const { data } = await redmineClient(rec).get(`/issues/${issueId}.json`);
+    const cf = (data.issue?.custom_fields || []).find(
+      (c) => String(c.id) === String(cfg.customFieldId),
+    );
+    return cf?.value ? Number(cf.value) : null;
+  } catch (e) {
+    console.warn(
+      '[workflow] talk.notify_person (custom_field): falha ao rebuscar tarefa',
+      e.message,
+    );
+    return null;
+  }
+}
+
 // Cliente Redmine autenticado a partir das credenciais do usuário (headless).
 function redmineClient(rec) {
   return axios.create({
@@ -1249,6 +1379,7 @@ function redmineClient(rec) {
       ...buildAuthHeaders(rec.key || '', rec.username || '', rec.password || ''),
       'Content-Type': 'application/json',
     },
+    ...(getInternalCaAgent() ? { httpsAgent: getInternalCaAgent() } : {}),
   });
 }
 

@@ -124,6 +124,33 @@ No modo dev, acesse **http://localhost:5173**. Em produção (exe), tudo é serv
 
 ## Variáveis de ambiente
 
+### Endereços dos sistemas (lidos no **build**)
+
+Definem — e **travam** — os campos de endereço da interface, para que ninguém
+precise digitar a URL do Redmine/Nextcloud na primeira execução. Ficam no `.env`
+da raiz do repositório e são **embutidas no `bluemine.exe`** durante o
+`vite build` (o Vite lê a raiz via `envDir`; ver [client/src/utils/appDefaults.ts](client/src/utils/appDefaults.ts)).
+
+Consequências práticas:
+
+- Editar o `.env` **depois** de gerar o executável não muda nada — é preciso rodar o build de novo.
+- Um campo só fica travado (read-only, com cadeado) quando a variável está definida. Sem ela, o campo continua editável, e o app segue utilizável num build sem `.env`.
+- Tudo que começa com `VITE_` **vai legível para dentro do `.exe`**. Só endereço aqui, nunca segredo.
+
+| Variável | Exemplo | Onde aparece |
+|---|---|---|
+| `VITE_REDMINE_URL` | `https://redmine.b2click.com` | Campo "URL do Redmine" na tela de login. |
+| `VITE_NEXTCLOUD_URL` | `https://drive.b2click.com` | Campo de endereço do Nextcloud em Configurações (Talk/Drive/Notas), nos dois modos de login. |
+| `VITE_ZIMBRA_HOST` | `email.redesoft.org` | Campo "servidor Zimbra" em Configurações → E-mail. Também lido pelo servidor (o antigo `ZIMBRA_HOST` continua aceito). |
+| `VITE_JITSI_DOMAIN` | `meet.b2click.com` | Servidor das videochamadas. Sem campo na interface; o `localStorage` serve de escape em dev quando a variável não está definida. |
+| `VITE_DOKUWIKI_HOST` | `wiki.redesoft.com.br` | Exibição da wiki e links "abrir no DokuWiki". Também lido pelo servidor (o antigo `DOKUWIKI_HOST` continua aceito). |
+
+Sem esses valores o app não quebra: os campos ficam em branco e editáveis, e as
+rotas de e-mail/wiki respondem `503` com instrução em vez de tentar uma URL
+malformada.
+
+### Configuração do servidor (lidas em **tempo de execução**)
+
 | Variável | Padrão | Descrição |
 |---|---|---|
 | `PORT` | `3001` | Porta do servidor. |
@@ -131,7 +158,7 @@ No modo dev, acesse **http://localhost:5173**. Em produção (exe), tudo é serv
 | `ALLOWED_HOSTS` | — | Hosts extras aceitos no cabeçalho `Host` (anti DNS-rebinding). O loopback já é liberado por padrão. |
 | `COOKIE_SECURE` | `0` | `1` para marcar o cookie de sessão como `secure` (HTTPS). |
 | `CSP_ENFORCE` | `0` | `1` ativa a CSP em modo de bloqueio (hoje em report-only). |
-| `DOKUWIKI_HOST` | `wiki.redesoft.com.br` | Host do DokuWiki corporativo (host fixo, não controlável pelo cliente). |
+| `DOKUWIKI_HOST` | — | Legado: preferir `VITE_DOKUWIKI_HOST` (acima), que serve aos dois lados. Host fixo, nunca controlável pelo cliente. |
 | `ALLOW_PLAINTEXT_SECRETS` | — | `1` permite gravar segredos em texto puro quando o DPAPI está indisponível (apenas dev fora do Windows; assume o risco conscientemente). |
 | `SSRF_WHITELIST` | — | Lista separada por vírgulas de domínios/IPs internos permitidos na proteção SSRF (ex: `drive.b2click.com,192.168.0.10`). |
 | `ALLOW_LOCAL_SSRF` | — | `1` desabilita completamente a proteção SSRF contra IPs locais/privados (use com cautela). |
@@ -147,9 +174,9 @@ No modo dev, acesse **http://localhost:5173**. Em produção (exe), tudo é serv
 
 > Ao iniciar o `bluemine.exe`, o app abre sozinho numa janela dedicada (Edge em *app mode*, sem barra de endereço; se não houver Edge, cai no navegador padrão). Se o exe já estiver rodando, um novo duplo-clique apenas traz a janela de volta em vez de subir outra instância.
 
-> O host de e-mail (Zimbra) tem padrão `email.redesoft.org` e é configurável na própria interface.
+> O host de e-mail (Zimbra) vem de `VITE_ZIMBRA_HOST`. Se a variável não estiver definida no build, o campo continua editável na própria interface.
 
-**Uso com o executável:** Para configurar essas variáveis ao rodar a versão compilada, crie um arquivo chamado exatamente `.env` na mesma pasta onde está o `bluemine.exe`. O aplicativo irá ler as configurações automaticamente ao iniciar (use o arquivo `.env.example` como base).
+**Uso com o executável:** vale para as variáveis de **tempo de execução** da tabela acima — os endereços `VITE_*` já estão embutidos e não são relidos daqui. Para configurar as demais ao rodar a versão compilada, crie um arquivo chamado exatamente `.env` na mesma pasta onde está o `bluemine.exe`. O aplicativo irá ler as configurações automaticamente ao iniciar (use o arquivo `.env.example` como base).
 
 ---
 

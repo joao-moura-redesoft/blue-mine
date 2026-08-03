@@ -6,9 +6,10 @@ const router = express.Router();
 const handle = require('../lib/handle');
 const { makeTalk } = require('../services/talk');
 const { getMatches: getTalkMatches } = require('../services/talkMatch');
-const { getMyUserId } = require('../lib/redmine');
+const { makeRedmine, getMyUserId } = require('../lib/redmine');
 const { saveTalkAuth, clearTalkAuth, getTalkAuth } = require('../services/talkStore');
 const { safeAgents } = require('../lib/ssrfGuard');
+const { getInternalCaAgent } = require('../lib/internalCa');
 const AppError = require('../lib/AppError');
 
 // Valida que uma URL é http(s) e bem-formada antes de o servidor buscá-la.
@@ -103,6 +104,7 @@ router.post(
         baseURL: url.replace(/\/$/, ''),
         auth: { username: user, password: token },
         headers: { 'OCS-APIRequest': 'true', Accept: 'application/json' },
+        ...(getInternalCaAgent() ? { httpsAgent: getInternalCaAgent() } : {}),
       });
       await client.get('/ocs/v2.php/cloud/user?format=json');
     } catch {
@@ -146,7 +148,10 @@ router.get(
   '/talk/me',
   handle(async (req, res) => {
     const { data } = await (await makeTalk(req)).get('/ocs/v2.php/cloud/user?format=json');
-    res.json({ id: data.ocs.data.id, displayName: data.ocs.data.display_name });
+    const d = data.ocs.data ?? {};
+    // O /cloud/user expõe `displayname` (e `display-name`), NÃO `display_name` —
+    // a chave errada devolvia sempre undefined e a bolha otimista saía sem nome.
+    res.json({ id: d.id, displayName: d.displayname || d['display-name'] || '' });
   }),
 );
 
@@ -975,7 +980,10 @@ router.get(
 router.get(
   '/talk/redmine-match',
   handle(async (req, res) => {
-    const data = await getTalkMatches(req, { forceRefresh: req.query.refresh === '1' });
+    const uid = await getMyUserId(req);
+    const data = await getTalkMatches(uid, makeRedmine(req), {
+      forceRefresh: req.query.refresh === '1',
+    });
     res.json(data);
   }),
 );

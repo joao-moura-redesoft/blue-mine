@@ -7,31 +7,27 @@
 // lista todos os usuários da instância pra qualquer conta autenticada. É essa fonte que
 // usamos aqui. A exportação é grande (~10-20MB, inclui fotos em base64), então o
 // resultado do cruzamento fica em cache em disco com TTL.
-const axios = require('axios');
+//
+// Deliberadamente não recebe `req`: o motor de automações (workflowEngine.js) roda em
+// segundo plano, sem sessão HTTP viva, só com credenciais armazenadas por uid — por
+// isso as funções aqui pedem (uid, redmine) explícitos, e tanto a rota HTTP quanto o
+// motor de automações montam esses dois argumentos à sua maneira.
 const { createJsonStore } = require('../lib/jsonStore');
-const { makeTalk } = require('./talk');
-const { getMyUserId } = require('../lib/redmine');
-const { getTalkAuth } = require('./talkStore');
+const { getTalkAuth, talkClientFor } = require('./talkStore');
+const { listAllUsers } = require('./teams');
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 const store = createJsonStore('talk-match-cache.json', {
-  fallback: { updatedAt: 0, byRedmineId: {} },
+  fallback: { updatedAt: 0, byRedmineId: {}, byNcUid: {} },
 });
 
 function normName(s) {
-  return (s || '')
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, ' ');
+  return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
 }
 
 function tokenize(s) {
-  return normName(s)
-    .split(' ')
-    .filter(Boolean);
+  return normName(s).split(' ').filter(Boolean);
 }
 
 // small é subsequência de big se todos os tokens de small aparecem em big, na mesma ordem
@@ -56,23 +52,25 @@ function fuzzyNameMatch(nameA, nameB) {
 
 function parseVcf(text) {
   const cards = text.split('BEGIN:VCARD').slice(1);
-  const prop = (c, name) =>
-    new RegExp(`^${name}(?:;[^:\\r\\n]*)?:(.*)$`, 'm').exec(c)?.[1]?.trim();
+  const prop = (c, name) => new RegExp(`^${name}(?:;[^:\\r\\n]*)?:(.*)$`, 'm').exec(c)?.[1]?.trim();
   return cards
     .map((c) => ({ fn: prop(c, 'FN'), uid: prop(c, 'UID') }))
     .filter((c) => c.fn && c.uid);
 }
 
-async function fetchAddressBookContacts(req) {
-  const talk = await makeTalk(req);
-  const uid = await getMyUserId(req);
-  let principalId = (getTalkAuth(uid) || {}).user;
+async function fetchAddressBookContacts(uid) {
+  const talk = talkClientFor(uid);
+  if (!talk) throw Object.assign(new Error('Conta do Talk não vinculada'), { statusCode: 401 });
+
+  const auth = getTalkAuth(uid);
+  let principalId = auth.user;
   try {
     const { data } = await talk.get('/ocs/v2.php/cloud/user?format=json');
     if (data?.ocs?.data?.id) principalId = data.ocs.data.id;
   } catch {
     /* segue com o login name mesmo */
   }
+
   const path = `/remote.php/dav/addressbooks/users/${encodeURIComponent(principalId)}/z-server-generated--system?export`;
   const { data } = await talk.get(path, {
     responseType: 'text',
@@ -82,18 +80,14 @@ async function fetchAddressBookContacts(req) {
   return parseVcf(String(data));
 }
 
-async function fetchRedmineMembers(req) {
-  const base = `${req.protocol}://${req.get('host')}`;
-  const { data } = await axios.get(`${base}/api/members`, {
-    headers: { cookie: req.headers.cookie || '' },
-  });
-  return data.users || [];
-}
-
-async function buildMatches(req) {
+// uid: id do usuário Redmine dono da conta Talk usada pra buscar o catálogo (qualquer
+// conta autenticada serve — o catálogo não é escopado por visibilidade).
+// redmine: instância axios já autenticada (makeRedmine(req) no fluxo HTTP,
+// redmineClient(rec) no motor de automações).
+async function buildMatches(uid, redmine) {
   const [contacts, redmineUsers] = await Promise.all([
-    fetchAddressBookContacts(req),
-    fetchRedmineMembers(req),
+    fetchAddressBookContacts(uid),
+    listAllUsers(redmine),
   ]);
 
   const byExactName = new Map();
@@ -129,15 +123,26 @@ async function buildMatches(req) {
     // sem entrada = sem candidato encontrado
   }
 
-  store.data = { updatedAt: Date.now(), byRedmineId };
+  // Índice reverso — usado pelo pop-up de perfil do Talk pra linkar de volta pro
+  // Redmine (dado o ncUid, achar a pessoa). Só entra aqui quem tem match único
+  // (exact/fuzzy); ambíguos não têm um ncUid definido pra indexar.
+  const byNcUid = {};
+  for (const [redmineId, m] of Object.entries(byRedmineId)) {
+    if (m.ncUid) byNcUid[m.ncUid] = Number(redmineId);
+  }
+
+  store.data = { updatedAt: Date.now(), byRedmineId, byNcUid };
   store.save();
   return store.data;
 }
 
-async function getMatches(req, { forceRefresh = false } = {}) {
+async function getMatches(uid, redmine, { forceRefresh = false } = {}) {
   const stale = Date.now() - (store.data.updatedAt || 0) > CACHE_TTL_MS;
-  if (forceRefresh || stale || !store.data.byRedmineId) {
-    return buildMatches(req);
+  // !byNcUid cobre cache em disco escrito por uma versão anterior deste arquivo
+  // (antes do índice reverso existir) — sem isso, o cache velho fica servido até
+  // expirar o TTL de 24h e quebra quem depende do byNcUid (pop-up de perfil do Talk).
+  if (forceRefresh || stale || !store.data.byRedmineId || !store.data.byNcUid) {
+    return buildMatches(uid, redmine);
   }
   return store.data;
 }

@@ -80,6 +80,10 @@ export function useActivityNotifications(
         tag: `rk-a-${issue.id}`,
       }),
     );
+    // currentUserId fica fora: este efeito é um detector de diferença sobre
+    // assignedIssues. Reexecutar por causa do usuário não geraria nada novo —
+    // seenAssigned já teria absorvido os ids na passada anterior.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assignedIssues, notify]);
 
   // ── Novos pedidos de revisão ───────────────────────────────────────────

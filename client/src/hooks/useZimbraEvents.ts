@@ -35,8 +35,11 @@ export function useReplyToInvite() {
     mutationFn: ({ id, verb, compNum }: { id: string; verb: InviteVerb; compNum?: number }) =>
       mailApi.replyToInvite(id, verb, compNum),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['zimbra-calendar'] });
-      qc.invalidateQueries({ queryKey: ['zimbra-attendees'] });
+      // refetchType: 'all' — sem isso só a janela [start,end] ATIVA na tela recarrega;
+      // Mês e Semana pedem janelas diferentes, então trocar de visão mostrava dado velho
+      // até o staleTime vencer (ver mesmo comentário em useCreateEvent).
+      qc.invalidateQueries({ queryKey: ['zimbra-calendar'], refetchType: 'all' });
+      qc.invalidateQueries({ queryKey: ['zimbra-attendees'], refetchType: 'all' });
     },
   });
 }
@@ -47,7 +50,12 @@ export function useCreateEvent() {
   return useMutation({
     mutationFn: (payload: CreateEventPayload) => mailApi.createEvent(payload),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['zimbra-calendar'] });
+      // Mês e Semana são consultas DIFERENTES (janelas [start,end] distintas). Por
+      // padrão invalidateQueries só refaz a que está ativa na tela agora; a outra
+      // fica "stale" mas só busca de novo quando for montada de novo — se você criar
+      // na visão de Semana e checar o Mês na sequência, ele ainda mostra o cache velho.
+      // 'all' força as duas a se atualizarem já.
+      qc.invalidateQueries({ queryKey: ['zimbra-calendar'], refetchType: 'all' });
     },
   });
 }

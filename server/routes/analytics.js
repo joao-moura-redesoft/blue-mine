@@ -24,21 +24,24 @@ const bucketOf = (d, watch, stuck) => (d >= stuck ? 'stuck' : d >= watch ? 'watc
 const analyticsCache = new Map();
 const ANALYTICS_CACHE_TTL = 5 * 60 * 1000;
 
-setInterval(() => {
-  const now = Date.now();
-  for (const [k, v] of analyticsCache) if (now > v.expiresAt) analyticsCache.delete(k);
-}, Math.max(5000, ANALYTICS_CACHE_TTL)).unref();
+setInterval(
+  () => {
+    const now = Date.now();
+    for (const [k, v] of analyticsCache) if (now > v.expiresAt) analyticsCache.delete(k);
+  },
+  Math.max(5000, ANALYTICS_CACHE_TTL),
+).unref();
 
 router.use((req, res, next) => {
   if (req.method !== 'GET') return next();
   const authKey = req.headers['x-redmine-key'] || req.headers['x-redmine-user'] || 'anon';
   const key = `${authKey}|${req.originalUrl}`;
-  
+
   const cached = analyticsCache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
     return res.json(cached.data);
   }
-  
+
   const originalJson = res.json;
   res.json = function (data) {
     analyticsCache.set(key, { data, expiresAt: Date.now() + ANALYTICS_CACHE_TTL });

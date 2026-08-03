@@ -335,6 +335,10 @@ export function FilePreviewModal({
       active = false;
       if (urlRef.current) URL.revokeObjectURL(urlRef.current);
     };
+    // Só o arquivo entra como dep. `kind` é derivado do nome e `load` é
+    // recriado a cada render — incluí-los rebaixaria o blob e recriaria o
+    // object URL a cada render do pai.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file.name]);
 
   const openInNc = () => {

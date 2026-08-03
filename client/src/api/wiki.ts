@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { hasEffectiveCreds } from '../utils/adConfig';
+import { dokuwikiPageUrl } from '../utils/appDefaults';
 
 export interface WikiSearchResult {
   id: string;
@@ -30,5 +31,5 @@ export const wikiApi = {
   getPage: (id: string): Promise<WikiPageContent> =>
     wikiAxios.get('/api/wiki/page', { params: { id } }).then((r) => r.data),
 
-  pageUrl: (id: string) => `https://wiki.redesoft.com.br/doku.php?id=${encodeURIComponent(id)}`,
+  pageUrl: dokuwikiPageUrl,
 };

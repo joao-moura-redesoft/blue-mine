@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import DOMPurify from 'dompurify';
 import { useQuery } from '@tanstack/react-query';
+import { isAxiosError } from 'axios';
 import {
   BookOpen,
   Search,
@@ -16,6 +17,7 @@ import { wikiApi, isWikiAvailable } from '../api/wiki';
 import type { WikiSearchResult } from '../api/wiki';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { dokuwikiHost } from '../utils/appDefaults';
 
 // --- WikiPageReader ---
 
@@ -157,6 +159,17 @@ function WikiCredentialsNeeded() {
   );
 }
 
+function wikiSearchErrorMessage(err: unknown): string {
+  if (isAxiosError(err)) {
+    const status = err.response?.status;
+    if (status === 401)
+      return 'Credenciais inválidas para o DokuWiki. Verifique usuário/senha do AD.';
+    if (status === 504 || err.code === 'ECONNABORTED')
+      return 'A busca no DokuWiki demorou demais para responder. Tente um termo mais específico ou tente novamente.';
+  }
+  return 'Erro ao buscar no DokuWiki.';
+}
+
 // --- WikiView principal ---
 
 export function WikiView() {
@@ -206,7 +219,7 @@ export function WikiView() {
           <BookOpen size={18} />
           Wiki
         </h2>
-        <p className="text-sm text-slate-500 mt-0.5">wiki.redesoft.com.br</p>
+        <p className="text-sm text-slate-500 mt-0.5">{dokuwikiHost}</p>
       </div>
 
       <div className="flex-1 flex gap-4 min-h-0">
@@ -263,7 +276,7 @@ export function WikiView() {
             {err && (
               <div className="flex items-center gap-2 m-3 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm">
                 <AlertCircle size={14} />
-                Erro ao buscar no DokuWiki. Verifique as credenciais.
+                {wikiSearchErrorMessage(err)}
               </div>
             )}
             {!hasSearch && !loading && (
@@ -330,7 +343,7 @@ export function WikiLinkSearch({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
       <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl w-full max-w-lg flex flex-col max-h-[70vh]">
         {/* Header */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">

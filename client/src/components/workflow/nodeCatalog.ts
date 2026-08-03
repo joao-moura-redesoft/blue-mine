@@ -37,6 +37,7 @@ import {
   Braces,
   ScrollText,
   KeyRound,
+  Contact,
   type LucideIcon,
 } from 'lucide-react';
 import type { NodeKind, WorkflowNode } from '../../api/workflows';
@@ -62,7 +63,8 @@ export const TRIGGERS: NodeDescriptor[] = [
     kind: 'trigger',
     type: 'issue.created',
     label: 'Tarefa criada / recebida',
-    description: 'Dispara quando uma tarefa nova aparece (atribuída, revisão ou monitorada).',
+    description:
+      'Dispara quando uma tarefa nova aparece: recebida (atribuída a você), criada por você (mesmo se for pra outra pessoa), pra revisão ou monitorada.',
     icon: PlusCircle,
     accent: TRIGGER_ACCENT,
     defaultConfig: () => ({ category: '' }),
@@ -251,6 +253,16 @@ export const ACTIONS: NodeDescriptor[] = [
     icon: CircleDot,
     accent: ACTION_ACCENT,
     defaultConfig: () => ({ statusType: 'dnd', message: '' }),
+  },
+  {
+    kind: 'action',
+    type: 'talk.notify_person',
+    label: 'Avisar pessoa no Talk',
+    description:
+      'Manda mensagem direta no Talk pro responsável/autor/campo personalizado da tarefa (por vínculo de nome — nem sempre existe ou é permitido).',
+    icon: Contact,
+    accent: ACTION_ACCENT,
+    defaultConfig: () => ({ who: 'assigned_to', userId: '', customFieldId: '', message: '' }),
   },
   {
     kind: 'action',
@@ -505,6 +517,7 @@ export const WRITE_ACTIONS = new Set([
   'time.log',
   'time.log_timer',
   'talk.send',
+  'talk.notify_person',
   'email.send',
   'webhook',
 ]);
@@ -527,7 +540,6 @@ export const ACTION_OUTPUTS: Record<string, string[]> = {
 // ---------------------------------------------------------------------------
 // Resumo e validação de um nó — alimentam o card no canvas.
 // ---------------------------------------------------------------------------
-const WEEK = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
 const pad = (n: unknown) => String(Number(n) || 0).padStart(2, '0');
 
 /** Linha curta abaixo do título do nó, resumindo a config. '' se não houver. */
@@ -545,14 +557,25 @@ export function summarize(node: WorkflowNode): string {
           : `diariamente às ${pad(c.hour)}:${pad(c.minute)}`;
       if (node.type === 'schedule') return when;
       const scope =
-        { assigned: 'atribuídas', review: 'para revisão', monitored: 'monitoradas', all: 'todas' }[
-          s('scope') || 'assigned'
-        ] ?? '';
+        {
+          assigned: 'atribuídas',
+          authored: 'criadas por mim',
+          review: 'para revisão',
+          monitored: 'monitoradas',
+          all: 'todas',
+        }[s('scope') || 'assigned'] ?? '';
       const suffix = node.type === 'time.budget_exceeded' ? ' · acima do orçamento' : '';
       return `${when} · ${scope}${suffix}`;
     }
-    case 'issue.created':
-      return s('category') ? `categoria: ${s('category')}` : 'qualquer nova tarefa';
+    case 'issue.created': {
+      const label = {
+        assigned: 'recebida (atribuída a mim)',
+        authored: 'criada por mim',
+        review: 'para revisão',
+        monitored: 'monitorada',
+      }[s('category')];
+      return label ?? 'qualquer nova tarefa';
+    }
     case 'issue.status_changed': {
       const from = s('from') ? `de #${s('from')}` : '';
       const to = s('to') ? `para #${s('to')}` : 'qualquer status';
@@ -606,6 +629,15 @@ export function summarize(node: WorkflowNode): string {
       );
     case 'talk.send':
       return s('roomToken') ? 'envia na sala escolhida' : '';
+    case 'talk.notify_person':
+      return (
+        {
+          assigned_to: 'responsável',
+          author: 'autor',
+          fixed: 'pessoa fixa',
+          custom_field: 'campo personalizado',
+        }[s('who') || 'assigned_to'] ?? ''
+      );
     case 'issue.comment':
       return s('body').slice(0, 40);
     case 'issue.update': {
@@ -698,6 +730,11 @@ export function validateNode(node: WorkflowNode): string[] {
   switch (node.type) {
     case 'talk.send':
       need('roomToken', 'sala');
+      need('message', 'mensagem');
+      break;
+    case 'talk.notify_person':
+      if (c.who === 'fixed') need('userId', 'pessoa');
+      if (c.who === 'custom_field') need('customFieldId', 'campo personalizado');
       need('message', 'mensagem');
       break;
     case 'issue.comment':

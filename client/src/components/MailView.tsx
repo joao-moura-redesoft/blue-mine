@@ -9,6 +9,7 @@ import {
   AlertOctagon,
   Search,
   RefreshCw,
+  Settings,
   Paperclip,
   X,
   Reply,
@@ -39,10 +40,14 @@ import {
 import {
   needsMailConfig,
   getSignature,
+  getFooterImageHtml,
   getTemplates,
   type MailTemplate,
 } from '../utils/mailConfig';
+import { inlineDataImages } from '../utils/mailInlineImages';
 import { MailComposeEditor } from './MailComposeEditor';
+import { MailSettingsModal } from './MailSettingsModal';
+import { errorDetail } from '../utils/httpError';
 
 // Ícone e ordem amigável por pasta do Zimbra.
 const FOLDER_META: Record<string, { label: string; icon: React.ReactNode; order: number }> = {
@@ -72,10 +77,13 @@ interface ComposeSeed {
   forwardParts?: ForwardPart[];
 }
 
-// Assinatura (HTML) precedida de espaço, para posicionar o cursor acima dela.
+// Assinatura (HTML) + rodapé de imagem, precedidos de espaço para posicionar o
+// cursor acima deles. A imagem entra como data URI e vira anexo inline (cid:)
+// só na hora de enviar — ver inlineDataImages.
 function signatureSeed(): string {
   const sig = getSignature();
-  return sig ? `<p></p>${sig}` : '<p></p>';
+  const footer = getFooterImageHtml();
+  return `<p></p>${sig || ''}${footer}`;
 }
 
 // Bloco citado (cabeçalho + corpo original) em HTML, para reply/forward.
@@ -148,6 +156,7 @@ function MailViewInner() {
   const [folder, setFolder] = useState('inbox');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [showSettings, setShowSettings] = useState(false);
   const [activeSearch, setActiveSearch] = useState('');
   const [limit, setLimit] = useState(40);
   const [compose, setCompose] = useState<ComposeSeed | null>(null);
@@ -274,7 +283,16 @@ function MailViewInner() {
         >
           <RefreshCw size={15} className={listQuery.isFetching ? 'animate-spin' : ''} />
         </button>
+        <button
+          onClick={() => setShowSettings(true)}
+          title="Preferências de e-mail (assinatura, rodapé, modelos)"
+          className="p-1.5 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+        >
+          <Settings size={15} />
+        </button>
       </div>
+
+      {showSettings && <MailSettingsModal onClose={() => setShowSettings(false)} />}
 
       {/* Corpo: pastas | lista | leitura */}
       <div className="flex-1 min-h-0 flex gap-3">
@@ -695,28 +713,35 @@ function ComposeModal({
 
   // Payload comum a enviar e salvar rascunho. O HTML é sanitizado (remove
   // <script> etc.) e o texto plano é derivado para o fallback multipart.
-  const buildPayload = () => ({
-    to: split(to),
-    cc: split(cc),
-    bcc: split(bcc),
-    subject,
-    html: DOMPurify.sanitize(bodyHtml),
-    text: htmlToText(bodyHtml),
-    inReplyTo: initial.inReplyTo,
-    attachments: attachments.map((a) => ({ aid: a.aid })),
-    forwardParts: initial.forwardParts,
-  });
+  // Sanitiza ANTES de trocar data:→cid: — o DOMPurify aceita `cid:`, mas não há
+  // motivo de passar o base64 inteiro por ele.
+  const buildPayload = async () => {
+    const sanitized = DOMPurify.sanitize(bodyHtml);
+    const { html, inlineAttachments } = await inlineDataImages(sanitized);
+    return {
+      to: split(to),
+      cc: split(cc),
+      bcc: split(bcc),
+      subject,
+      html,
+      text: htmlToText(bodyHtml),
+      inReplyTo: initial.inReplyTo,
+      attachments: attachments.map((a) => ({ aid: a.aid })),
+      forwardParts: initial.forwardParts,
+      inlineAttachments,
+    };
+  };
 
   const sendMut = useMutation({
-    mutationFn: () => mailApi.send(buildPayload()),
+    mutationFn: async () => mailApi.send(await buildPayload()),
     onSuccess: onSent,
-    onError: (e: any) => setError(e?.response?.data?.error || 'Falha ao enviar.'),
+    onError: (e: unknown) => setError(errorDetail(e) || 'Falha ao enviar.'),
   });
 
   const draftMut = useMutation({
-    mutationFn: () => mailApi.saveDraft(buildPayload()),
+    mutationFn: async () => mailApi.saveDraft(await buildPayload()),
     onSuccess: onSent,
-    onError: (e: any) => setError(e?.response?.data?.error || 'Falha ao salvar rascunho.'),
+    onError: (e: unknown) => setError(errorDetail(e) || 'Falha ao salvar rascunho.'),
   });
 
   const busy = sendMut.isPending || draftMut.isPending;
@@ -729,8 +754,8 @@ function ComposeModal({
       try {
         const up = await mailApi.uploadAttachment(file);
         setAttachments((list) => [...list, up]);
-      } catch (e: any) {
-        setError(e?.response?.data?.error || `Falha ao anexar ${file.name}.`);
+      } catch (e) {
+        setError(errorDetail(e) || `Falha ao anexar ${file.name}.`);
       } finally {
         setUploading((n) => n - 1);
       }
@@ -757,7 +782,7 @@ function ComposeModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop"
       onClick={onClose}
     >
       <div

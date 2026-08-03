@@ -36,6 +36,56 @@ function loadTeamOverrides() {
   return loadTeamsConfig().overrides || {};
 }
 
+// Lista de projetos (paginada). Ver comentário em routes/meta.js sobre os fallbacks
+// (o /projects.json pode dar 500 por bug de plugin/custom field no servidor).
+async function getProjectList(redmine) {
+  try {
+    const limit = 100;
+    let offset = 0,
+      all = [],
+      total = Infinity;
+    while (offset < total) {
+      const { data } = await redmine.get('/projects.json', { params: { limit, offset } });
+      if (data.total_count != null) total = data.total_count;
+      all = all.concat(data.projects || []);
+      offset += limit;
+      if ((data.projects || []).length === 0) break;
+    }
+    return all.map((p) => ({ id: p.id, name: p.name }));
+  } catch (err) {
+    console.error(
+      '[projects] /projects.json falhou:',
+      err.response?.status,
+      JSON.stringify(err.response?.data ?? err.message),
+    );
+  }
+
+  try {
+    const { data } = await redmine.get('/users/current.json', {
+      params: { include: 'memberships' },
+    });
+    const map = new Map();
+    for (const m of data.user?.memberships || [])
+      if (m.project) map.set(m.project.id, m.project.name);
+    if (map.size) {
+      const projects = [...map.entries()].map(([id, name]) => ({ id, name }));
+      console.warn(`[projects] usando fallback por memberships: ${projects.length} projetos`);
+      return projects;
+    }
+  } catch (err) {
+    console.error('[projects] fallback memberships falhou:', err.response?.status);
+  }
+
+  const { data } = await redmine.get('/issues.json', {
+    params: { assigned_to_id: 'me', status_id: '*', limit: 100 },
+  });
+  const map = new Map();
+  for (const i of data.issues || []) if (i.project) map.set(i.project.id, i.project.name);
+  const projects = [...map.entries()].map(([id, name]) => ({ id, name }));
+  console.warn(`[projects] usando fallback por tarefas: ${projects.length} projetos`);
+  return projects;
+}
+
 // Busca TODAS as páginas de membros de um projeto
 async function fetchAllMemberships(redmine, projectId) {
   const limit = 100;
@@ -132,6 +182,26 @@ async function loadReferenceTeams(req) {
   return map;
 }
 
+// Todos os usuários (id + nome) de todos os projetos, sem derivar equipe — usado
+// por quem só precisa "quem existe", como o cruzamento com o Talk (talkMatch.js).
+async function listAllUsers(redmine) {
+  const projects = await getProjectList(redmine);
+  const byId = new Map();
+  for (const p of projects) {
+    let memberships = [];
+    try {
+      memberships = await fetchAllMemberships(redmine, p.id);
+    } catch {
+      /* projeto inacessível */
+    }
+    for (const m of memberships) {
+      if (!m.user || byId.has(m.user.id)) continue;
+      byId.set(m.user.id, { id: m.user.id, name: m.user.name });
+    }
+  }
+  return [...byId.values()];
+}
+
 function deriveTeam(roles, userId, overrides, refTeams) {
   // 1) Override manual tem prioridade
   if (overrides[String(userId)]) return overrides[String(userId)];
@@ -150,7 +220,9 @@ module.exports = {
   roleToTeam,
   loadTeamsConfig,
   loadTeamOverrides,
+  getProjectList,
   fetchAllMemberships,
+  listAllUsers,
   loadReferenceTeams,
   deriveTeam,
 };

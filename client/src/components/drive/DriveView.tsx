@@ -175,6 +175,9 @@ function DriveThumb({ entry, className }: { entry: DriveEntry; className?: strin
       io.disconnect();
       if (urlRef.current) URL.revokeObjectURL(urlRef.current);
     };
+    // Chaveado no id do arquivo: `entry` muda de identidade a cada refetch da
+    // listagem e reiniciaria o IntersectionObserver + o download da thumb.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entry.fileId]);
 
   return (
@@ -1431,7 +1434,7 @@ function Modal({
 }) {
   return (
     <div
-      className="fixed inset-0 z-[150] flex items-center justify-center bg-black/30 p-4"
+      className="fixed inset-0 z-[150] flex items-center justify-center modal-backdrop p-4"
       onClick={onClose}
     >
       <div
@@ -1893,7 +1896,7 @@ function TrashModal({ onClose, onChanged }: { onClose: () => void; onChanged: ()
 
   return (
     <div
-      className="fixed inset-0 z-[150] flex items-center justify-center bg-black/30 p-4"
+      className="fixed inset-0 z-[150] flex items-center justify-center modal-backdrop p-4"
       onClick={onClose}
     >
       <div

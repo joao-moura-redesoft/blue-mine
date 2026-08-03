@@ -1,8 +1,31 @@
-import { useState, useEffect, useRef } from 'react';
-import { useProjects, useProjectMembers, useAllMembers, useUserIssues } from '../hooks/useRedmine';
+import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import {
+  useProjects,
+  useProjectMembers,
+  useAllMembers,
+  useUserIssues,
+  useStatuses,
+} from '../hooks/useRedmine';
 import { IssueListView } from './IssueListView';
-import { TalkContactButton } from './TalkContactButton';
-import { ChevronDown, Search, Check, User, Users } from 'lucide-react';
+import { IssueCard } from './IssueCard';
+import { PersonAvatar } from './PersonAvatar';
+import type { Issue } from '../types/redmine';
+import {
+  ChevronDown,
+  Search,
+  Check,
+  User,
+  Users,
+  AlertTriangle,
+  Play,
+  Loader2,
+  List,
+  Columns,
+} from 'lucide-react';
+
+// Status "Em andamento" no Redmine desta instalação (mesma convenção do TeamView).
+const IN_PROGRESS_STATUS_ID = 8;
 
 const TEAM_ORDER = [
   'Desenvolvimento',
@@ -30,13 +53,45 @@ export function PeopleView({ onIssueClick, onOpenTalk, openingTalkFor }: Props) 
   const isAll = project === 'all';
   const [personId, setPersonId] = useState<number | undefined>(undefined);
 
-  const { data: projectMembers } = useProjectMembers(isAll ? undefined : project);
-  const { data: allMembers } = useAllMembers(isAll);
+  const { data: projectMembers, isLoading: loadingProjectMembers } = useProjectMembers(
+    isAll ? undefined : project,
+  );
+  const { data: allMembers, isLoading: loadingAllMembers } = useAllMembers(isAll);
   const members = isAll ? allMembers : projectMembers;
+  const membersLoading = isAll ? loadingAllMembers : loadingProjectMembers;
 
   const userIssues = useUserIssues(personId);
+  const { data: statuses } = useStatuses();
+
+  const [viewMode, setViewMode] = useState<'list' | 'board'>('list');
 
   const person = members?.find((m) => m.id === personId);
+
+  // Link direto (ex.: vindo do pop-up de perfil do Talk): /people?person=123
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const p = searchParams.get('person');
+    if (!p) return;
+    setPersonId(Number(p));
+    setSearchParams(
+      (prev) => {
+        prev.delete('person');
+        return prev;
+      },
+      { replace: true },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const stats = useMemo(() => {
+    const issues = userIssues.data ?? [];
+    const now = Date.now();
+    return {
+      total: issues.length,
+      overdue: issues.filter((i) => i.due_date && new Date(i.due_date).getTime() < now).length,
+      inProgress: issues.filter((i) => i.status.id === IN_PROGRESS_STATUS_ID).length,
+    };
+  }, [userIssues.data]);
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -64,6 +119,7 @@ export function PeopleView({ onIssueClick, onOpenTalk, openingTalkFor }: Props) 
           value={personId}
           onChange={setPersonId}
           disabled={false}
+          loading={membersLoading}
         />
       </div>
 
@@ -74,35 +130,187 @@ export function PeopleView({ onIssueClick, onOpenTalk, openingTalkFor }: Props) 
         </div>
       ) : (
         <>
-          <div className="flex items-center gap-2 mb-3 text-sm text-slate-600 dark:text-slate-300">
-            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold">
-              {person?.name
-                ?.split(' ')
-                .map((p) => p[0])
-                .slice(0, 2)
-                .join('')
-                .toUpperCase()}
+          <div className="flex flex-wrap items-center gap-4 mb-5 p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+            <PersonAvatar
+              redmineUserId={personId}
+              name={person?.name ?? ''}
+              size={52}
+              onOpenTalk={onOpenTalk}
+              openingTalkFor={openingTalkFor}
+            />
+            <div className="min-w-0">
+              <span className="font-semibold text-base text-slate-800 dark:text-slate-100 truncate block">
+                {person?.name}
+              </span>
+              {person?.team && (
+                <p className="text-xs text-slate-400 dark:text-slate-500">{person.team}</p>
+              )}
             </div>
-            <span className="font-medium text-slate-800 dark:text-slate-100">{person?.name}</span>
-            {person?.team && <span className="text-xs text-slate-400">· {person.team}</span>}
-            {onOpenTalk && (
-              <TalkContactButton
-                redmineUserId={personId}
-                onOpenTalk={onOpenTalk}
-                openingTalkFor={openingTalkFor}
+
+            <div className="flex items-center gap-2 ml-auto">
+              <StatChip icon={<Users size={12} />} value={stats.total} label="abertas" />
+              <StatChip
+                icon={<Play size={12} />}
+                value={stats.inProgress}
+                label="em andamento"
+                tone={stats.inProgress > 0 ? 'blue' : 'neutral'}
               />
-            )}
+              <StatChip
+                icon={<AlertTriangle size={12} />}
+                value={stats.overdue}
+                label="atrasada(s)"
+                tone={stats.overdue > 0 ? 'red' : 'neutral'}
+              />
+              <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5">
+                <button
+                  onClick={() => setViewMode('list')}
+                  title="Ver em lista"
+                  className={`p-1.5 rounded-md transition-colors ${
+                    viewMode === 'list'
+                      ? 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                  }`}
+                >
+                  <List size={14} />
+                </button>
+                <button
+                  onClick={() => setViewMode('board')}
+                  title="Ver em quadro"
+                  className={`p-1.5 rounded-md transition-colors ${
+                    viewMode === 'board'
+                      ? 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-100 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                  }`}
+                >
+                  <Columns size={14} />
+                </button>
+              </div>
+            </div>
           </div>
-          <IssueListView
-            issues={userIssues.data}
-            isLoading={userIssues.isLoading}
-            isFetching={userIssues.isFetching}
-            onRefetch={userIssues.refetch}
-            onIssueClick={onIssueClick}
-            emptyMessage="Esta pessoa não tem tarefas abertas."
-          />
+          {viewMode === 'list' ? (
+            <IssueListView
+              issues={userIssues.data}
+              isLoading={userIssues.isLoading}
+              isFetching={userIssues.isFetching}
+              onRefetch={userIssues.refetch}
+              onIssueClick={onIssueClick}
+              emptyMessage="Esta pessoa não tem tarefas abertas."
+            />
+          ) : (
+            <PersonBoard
+              issues={userIssues.data}
+              statuses={statuses}
+              isLoading={userIssues.isLoading}
+              onIssueClick={onIssueClick}
+            />
+          )}
         </>
       )}
+    </div>
+  );
+}
+
+/* ── Quadro somente-leitura por status (mesma organização do "Minhas tarefas") ── */
+function PersonBoard({
+  issues,
+  statuses,
+  isLoading,
+  onIssueClick,
+}: {
+  issues?: Issue[];
+  statuses?: { id: number; name: string }[];
+  isLoading: boolean;
+  onIssueClick: (id: number) => void;
+}) {
+  const columns = useMemo(() => {
+    const byStatus = new Map<number, Issue[]>();
+    (issues ?? []).forEach((issue) => {
+      const arr = byStatus.get(issue.status.id) ?? [];
+      arr.push(issue);
+      byStatus.set(issue.status.id, arr);
+    });
+
+    const order = statuses ?? [];
+    const cols = order
+      .filter((s) => byStatus.has(s.id))
+      .map((s) => ({ id: s.id, name: s.name, issues: byStatus.get(s.id)! }));
+
+    // Status usado pelas issues mas ausente da lista geral (raro) — ainda assim mostra.
+    byStatus.forEach((list, id) => {
+      if (!cols.find((c) => c.id === id)) {
+        cols.push({ id, name: list[0].status.name, issues: list });
+      }
+    });
+
+    return cols;
+  }, [issues, statuses]);
+
+  if (isLoading) {
+    return <div className="py-16 text-center text-sm text-slate-400">Carregando…</div>;
+  }
+
+  if (columns.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+        <Columns size={32} className="mb-3 opacity-30" />
+        <p className="text-sm">Esta pessoa não tem tarefas abertas.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex gap-3 overflow-x-auto pb-2">
+      {columns.map((col) => (
+        <div
+          key={col.id}
+          className="flex flex-col w-72 flex-shrink-0 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+        >
+          <div className="px-3 py-2.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between flex-shrink-0">
+            <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 truncate">
+              {col.name}
+            </h3>
+            <span className="text-xs font-medium text-slate-400 bg-slate-100 dark:bg-slate-800 rounded-full px-2 py-0.5 flex-shrink-0">
+              {col.issues.length}
+            </span>
+          </div>
+          <div className="flex-1 p-2 space-y-2 bg-slate-50/50 dark:bg-slate-950/30 rounded-b-xl min-h-[80px]">
+            {col.issues.map((issue) => (
+              <IssueCard
+                key={issue.id}
+                issue={issue}
+                onClick={() => onIssueClick(issue.id)}
+                navigable={false}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── Chip de estatística do cabeçalho de perfil ── */
+function StatChip({
+  icon,
+  value,
+  label,
+  tone = 'neutral',
+}: {
+  icon: ReactNode;
+  value: number;
+  label: string;
+  tone?: 'neutral' | 'blue' | 'red';
+}) {
+  const toneClass = {
+    neutral: 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400',
+    blue: 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400',
+    red: 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400',
+  }[tone];
+  return (
+    <div className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs ${toneClass}`}>
+      {icon}
+      <span className="font-semibold">{value}</span>
+      <span className="opacity-80">{label}</span>
     </div>
   );
 }
@@ -206,11 +414,13 @@ function PersonPicker({
   value,
   onChange,
   disabled,
+  loading,
 }: {
   members: { id: number; name: string; team?: string }[];
   value?: number;
   onChange: (id: number) => void;
   disabled?: boolean;
+  loading?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -248,8 +458,14 @@ function PersonPicker({
         }}
         className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 rounded-lg px-3 py-2 min-w-56 max-w-72 disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        <User size={14} className="text-slate-400 flex-shrink-0" />
-        <span className="truncate flex-1 text-left">{current?.name ?? 'Selecionar pessoa...'}</span>
+        {loading ? (
+          <Loader2 size={14} className="text-slate-400 flex-shrink-0 animate-spin" />
+        ) : (
+          <User size={14} className="text-slate-400 flex-shrink-0" />
+        )}
+        <span className="truncate flex-1 text-left">
+          {loading ? 'Carregando pessoas…' : (current?.name ?? 'Selecionar pessoa...')}
+        </span>
         <ChevronDown size={14} className="text-slate-400 flex-shrink-0" />
       </button>
       {open && (
@@ -297,7 +513,10 @@ function PersonPicker({
               </div>
             ))}
             {filtered.length === 0 && (
-              <p className="px-3 py-2 text-xs text-slate-400">Nenhuma pessoa</p>
+              <p className="px-3 py-2 text-xs text-slate-400 flex items-center gap-1.5">
+                {loading && <Loader2 size={12} className="animate-spin" />}
+                {loading ? 'Carregando…' : 'Nenhuma pessoa'}
+              </p>
             )}
           </div>
         </div>

@@ -59,7 +59,7 @@ export function QuickAddModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center pt-24 px-4 bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-[60] flex items-start justify-center pt-24 px-4 modal-backdrop"
       onClick={onClose}
     >
       <div

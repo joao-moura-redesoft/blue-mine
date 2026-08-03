@@ -75,8 +75,18 @@ router.post(
 router.post(
   '/mail/send',
   handle(async (req, res) => {
-    const { to, cc, bcc, subject, text, html, inReplyTo, attachments, forwardParts } =
-      req.body || {};
+    const {
+      to,
+      cc,
+      bcc,
+      subject,
+      text,
+      html,
+      inReplyTo,
+      attachments,
+      forwardParts,
+      inlineAttachments,
+    } = req.body || {};
     if (!to || (Array.isArray(to) && to.length === 0)) {
       return res.status(400).json({ error: 'destinatário (to) obrigatório' });
     }
@@ -91,6 +101,7 @@ router.post(
         inReplyTo,
         attachments,
         forwardParts,
+        inlineAttachments,
       }),
     );
   }),
@@ -100,8 +111,18 @@ router.post(
 router.post(
   '/mail/draft',
   handle(async (req, res) => {
-    const { to, cc, bcc, subject, text, html, inReplyTo, attachments, forwardParts } =
-      req.body || {};
+    const {
+      to,
+      cc,
+      bcc,
+      subject,
+      text,
+      html,
+      inReplyTo,
+      attachments,
+      forwardParts,
+      inlineAttachments,
+    } = req.body || {};
     res.json(
       await zimbra.saveDraft(req, {
         to,
@@ -113,6 +134,7 @@ router.post(
         inReplyTo,
         attachments,
         forwardParts,
+        inlineAttachments,
       }),
     );
   }),

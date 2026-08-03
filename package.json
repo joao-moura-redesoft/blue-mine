@@ -7,9 +7,11 @@
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "server": "node server/index.js",
     "client": "npm run dev --prefix client",
-    "lint": "eslint .",
+    "lint": "eslint . && npm run lint --prefix client",
     "format": "prettier --write .",
-    "test": "vitest run",
+    "test": "npm run test:server && npm run test:client",
+    "test:server": "vitest run",
+    "test:client": "npm run test --prefix client",
     "test:watch": "vitest",
     "embed": "node scripts/embed-dist.cjs",
     "bundle": "esbuild server/index.js --bundle --platform=node --format=cjs --target=node20 --outfile=build/bluemine.bundle.cjs"

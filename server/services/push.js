@@ -7,6 +7,7 @@
 const axios = require('axios');
 const webpush = require('web-push');
 const { buildAuthHeaders } = require('../lib/redmine');
+const { getInternalCaAgent } = require('../lib/internalCa');
 const { fetchAllIssues } = require('../lib/pagination');
 const { REDMINE_CF, REDMINE_STATUS } = require('../lib/config');
 const { dataFile, readJsonSecure, writeJsonSecure } = require('../lib/secureStore');
@@ -64,6 +65,10 @@ async function collectPushState(url, key, username, password) {
   const client = axios.create({
     baseURL: url,
     headers: { ...buildAuthHeaders(key, username, password), 'Content-Type': 'application/json' },
+    // Timeout evita que uma conexão travada na rede prenda o tick do motor de
+    // automações para sempre (ver comentário equivalente em lib/redmine.js).
+    timeout: 20000,
+    ...(getInternalCaAgent() ? { httpsAgent: getInternalCaAgent() } : {}),
   });
   const me = (await client.get('/users/current.json')).data.user.id;
 
@@ -79,15 +84,22 @@ async function collectPushState(url, key, username, password) {
   const monitored = monitoredAll.filter(
     (i) => !i.assigned_to || String(i.assigned_to.id) !== String(me),
   );
+  // Tarefas que EU criei — inclusive quando atribuídas a outra pessoa (por isso não
+  // aparecem em `assigned`/`review`/`monitored`, que só olham o que É meu hoje). Só
+  // consumido pelo motor de automações (gatilho "Criada por mim"); o polling nativo de
+  // push NÃO notifica por isso — criar uma tarefa pra outra pessoa não deveria gerar um
+  // "nova tarefa" pra mim mesmo.
+  const authored = await fetchAllIssues(client, { author_id: 'me', status_id: 'open' });
 
   const byId = new Map();
-  [...assigned, ...review, ...monitored].forEach((i) => byId.set(i.id, i));
+  [...assigned, ...review, ...monitored, ...authored].forEach((i) => byId.set(i.id, i));
   return {
     issues: byId,
     seen: {
       assigned: assigned.map((i) => i.id),
       review: review.map((i) => i.id),
       monitored: monitored.map((i) => i.id),
+      authored: authored.map((i) => i.id),
     },
   };
 }
@@ -138,6 +150,7 @@ async function subscribe(req) {
         baseURL: talkAuth.url,
         auth: { username: talkAuth.user, password: talkAuth.token },
         headers: { 'OCS-APIRequest': 'true', Accept: 'application/json' },
+        ...(getInternalCaAgent() ? { httpsAgent: getInternalCaAgent() } : {}),
       });
       const { data } = await talkClient.get('/ocs/v2.php/apps/spreed/api/v4/room?format=json');
       for (const room of data.ocs.data || []) {
@@ -340,6 +353,7 @@ async function pollTalkGroup({ auth, recs }) {
       baseURL: auth.url,
       auth: { username: auth.user, password: auth.token },
       headers: { 'OCS-APIRequest': 'true', Accept: 'application/json' },
+      ...(getInternalCaAgent() ? { httpsAgent: getInternalCaAgent() } : {}),
     });
     const { data: tData } = await talkClient.get('/ocs/v2.php/apps/spreed/api/v4/room?format=json');
     recs.forEach((r) => {

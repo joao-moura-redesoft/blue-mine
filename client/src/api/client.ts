@@ -1,5 +1,4 @@
 import axios, { type AxiosInstance } from 'axios';
-import { getStoredAuth } from './redmine';
 
 // Cliente axios com baseURL /api configurado para enviar cookies HttpOnly
 export function createAuthedClient(): AxiosInstance {

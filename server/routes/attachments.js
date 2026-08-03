@@ -5,6 +5,7 @@ const router = express.Router();
 const { buildAuthHeaders } = require('../lib/redmine');
 const { createSession, getSession } = require('../lib/sessions');
 const { safeAgents } = require('../lib/ssrfGuard');
+const { getInternalCaAgent } = require('../lib/internalCa');
 const { createRateLimiter } = require('../middleware/rateLimit');
 const handle = require('../lib/handle');
 
@@ -99,6 +100,7 @@ router.get(
     const upstream = await axios.get(`${url}${path}`, {
       headers: buildAuthHeaders(key, username, password),
       responseType: 'arraybuffer',
+      ...(getInternalCaAgent() ? { httpsAgent: getInternalCaAgent() } : {}),
     });
     res.set('Content-Type', upstream.headers['content-type'] || 'application/octet-stream');
     res.set('Cache-Control', 'private, max-age=3600');

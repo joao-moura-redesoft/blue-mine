@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, lazy, Suspense } from 'react';
 import axios from 'axios';
 import {
   useCurrentUser,
@@ -10,18 +10,13 @@ import {
   useToReviewIssues,
   useMentions,
   useCompletedIssues,
+  useAddNote,
 } from './hooks/useRedmine';
 import { KanbanBoard } from './components/KanbanBoard';
 import { IssueListView } from './components/IssueListView';
+import { IssueListSkeleton } from './components/Skeletons';
 import { IssueModal } from './components/IssueModal';
-import { Dashboard } from './components/Dashboard';
-import { PeopleView } from './components/PeopleView';
-import { CalendarView } from './components/CalendarView';
-import { InboxView } from './components/InboxView';
 import { CommandPalette } from './components/CommandPalette';
-import { TeamView } from './components/TeamView';
-import { ReleaseView } from './components/ReleaseView';
-import { CreateIssueModal } from './components/CreateIssueModal';
 import { localWatches, useLocalWatches } from './utils/localWatches';
 import { Login } from './components/Login';
 import { GlobalSearch } from './components/GlobalSearch';
@@ -42,31 +37,9 @@ import { useTalkNotifications } from './hooks/useTalkNotifications';
 import { useCreateRoom } from './hooks/useTalk';
 import { useTheme } from './hooks/useTheme';
 import { useShortcuts } from './hooks/useShortcuts';
-import { SettingsModal } from './components/SettingsModal';
-import { StandupModal } from './components/StandupModal';
-import { DigestModal } from './components/DigestModal';
-import { TalkChat } from './components/TalkChat';
-import { NotesView } from './components/NotesView';
-import { WorkflowsView } from './components/WorkflowsView';
-import { SprintsView } from './components/SprintsView';
-import { RoadmapView } from './components/RoadmapView';
+import { PersonAvatar } from './components/PersonAvatar';
 import { UpdateBanner } from './components/UpdateBanner';
-import { AssistantView } from './components/AssistantView';
-import { MailView } from './components/MailView';
-import { WikiView } from './components/WikiView';
-import { TotpView } from './components/TotpView';
-import { MeetingsView } from './components/MeetingsView';
-import { DriveView } from './components/drive/DriveView';
-import { MyDayView } from './components/MyDayView';
-import { FlowView } from './components/FlowView';
-import { TrendsView } from './components/TrendsView';
-import { SlaView } from './components/SlaView';
-import { ProjectView } from './components/ProjectView';
-import { MeView } from './components/MeView';
 import { FocusWidget } from './components/FocusWidget';
-import { TimesheetView } from './components/TimesheetView';
-import { QuickAddModal } from './components/QuickAddModal';
-import { TemplatesModal } from './components/TemplatesModal';
 import type { NotePatch } from './api/notes';
 import { mailApi } from './api/mail';
 import { isMailAvailable } from './utils/mailConfig';
@@ -135,6 +108,97 @@ import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import type { Issue } from './types/redmine';
 
+/**
+ * Code splitting por rota/modal.
+ *
+ * O bundle era um chunk único de ~1,8 MB: toda a app (editor de workflows,
+ * Drive, calendário, Talk...) era baixada e *parseada* antes do primeiro
+ * paint, mesmo para quem só abre o Kanban. Estas views são carregadas sob
+ * demanda; o Vite gera um chunk por import().
+ *
+ * Ficam ansiosos de propósito: KanbanBoard e IssueListView (rotas quentes),
+ * IssueModal (abre em clique de qualquer lugar — chunk aqui viraria hitch
+ * visível) e os widgets sempre montados (CallWindow, FocusWidget...).
+ *
+ * lazy() espera export default e todos estes são exports nomeados, daí o
+ * .then() de unwrap — inline em vez de um helper genérico porque assim o TS
+ * infere as props de cada componente sozinho.
+ */
+const Dashboard = lazy(() =>
+  import('./components/Dashboard').then((m) => ({ default: m.Dashboard })),
+);
+const PeopleView = lazy(() =>
+  import('./components/PeopleView').then((m) => ({ default: m.PeopleView })),
+);
+const CalendarView = lazy(() =>
+  import('./components/CalendarView').then((m) => ({ default: m.CalendarView })),
+);
+const InboxView = lazy(() =>
+  import('./components/InboxView').then((m) => ({ default: m.InboxView })),
+);
+const TeamView = lazy(() => import('./components/TeamView').then((m) => ({ default: m.TeamView })));
+const ReleaseView = lazy(() =>
+  import('./components/ReleaseView').then((m) => ({ default: m.ReleaseView })),
+);
+const CreateIssueModal = lazy(() =>
+  import('./components/CreateIssueModal').then((m) => ({ default: m.CreateIssueModal })),
+);
+const SettingsModal = lazy(() =>
+  import('./components/SettingsModal').then((m) => ({ default: m.SettingsModal })),
+);
+const StandupModal = lazy(() =>
+  import('./components/StandupModal').then((m) => ({ default: m.StandupModal })),
+);
+const DigestModal = lazy(() =>
+  import('./components/DigestModal').then((m) => ({ default: m.DigestModal })),
+);
+const TalkChat = lazy(() => import('./components/TalkChat').then((m) => ({ default: m.TalkChat })));
+const NotesView = lazy(() =>
+  import('./components/NotesView').then((m) => ({ default: m.NotesView })),
+);
+const WorkflowsView = lazy(() =>
+  import('./components/WorkflowsView').then((m) => ({ default: m.WorkflowsView })),
+);
+const SprintsView = lazy(() =>
+  import('./components/SprintsView').then((m) => ({ default: m.SprintsView })),
+);
+const RoadmapView = lazy(() =>
+  import('./components/RoadmapView').then((m) => ({ default: m.RoadmapView })),
+);
+const AssistantView = lazy(() =>
+  import('./components/AssistantView').then((m) => ({ default: m.AssistantView })),
+);
+const MailView = lazy(() => import('./components/MailView').then((m) => ({ default: m.MailView })));
+const WikiView = lazy(() => import('./components/WikiView').then((m) => ({ default: m.WikiView })));
+const TotpView = lazy(() => import('./components/TotpView').then((m) => ({ default: m.TotpView })));
+const MeetingsView = lazy(() =>
+  import('./components/MeetingsView').then((m) => ({ default: m.MeetingsView })),
+);
+const DriveView = lazy(() =>
+  import('./components/drive/DriveView').then((m) => ({ default: m.DriveView })),
+);
+const MyDayView = lazy(() =>
+  import('./components/MyDayView').then((m) => ({ default: m.MyDayView })),
+);
+const FlowView = lazy(() => import('./components/FlowView').then((m) => ({ default: m.FlowView })));
+const TrendsView = lazy(() =>
+  import('./components/TrendsView').then((m) => ({ default: m.TrendsView })),
+);
+const SlaView = lazy(() => import('./components/SlaView').then((m) => ({ default: m.SlaView })));
+const ProjectView = lazy(() =>
+  import('./components/ProjectView').then((m) => ({ default: m.ProjectView })),
+);
+const MeView = lazy(() => import('./components/MeView').then((m) => ({ default: m.MeView })));
+const TimesheetView = lazy(() =>
+  import('./components/TimesheetView').then((m) => ({ default: m.TimesheetView })),
+);
+const QuickAddModal = lazy(() =>
+  import('./components/QuickAddModal').then((m) => ({ default: m.QuickAddModal })),
+);
+const TemplatesModal = lazy(() =>
+  import('./components/TemplatesModal').then((m) => ({ default: m.TemplatesModal })),
+);
+
 type Tab =
   | 'inbox'
   | 'dashboard'
@@ -169,6 +233,16 @@ type Tab =
 
 // Views de analytics agrupadas no submenu "Dashboards" da barra lateral.
 const DASHBOARD_IDS: Tab[] = ['dashboard', 'me', 'flow', 'trends', 'sla', 'project'];
+
+// Placeholder enquanto o chunk da rota chega. Reusa o skeleton de lista por ser
+// o formato mais comum entre as views; serve só para o layout não colapsar.
+function RouteFallback() {
+  return (
+    <div className="max-w-6xl mx-auto">
+      <IssueListSkeleton />
+    </div>
+  );
+}
 
 export function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!getStoredAuth());
@@ -265,6 +339,9 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
     description?: string;
     priorityId?: number;
     dueDate?: string;
+    // Presente quando a criação veio do botão "Impedimento" — após criar, comentamos
+    // nas duas tarefas em vez de usar a API de relations (a key não-admin toma 403 lá).
+    blockingIssue?: { id: number; subject: string };
   } | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [dashOpen, setDashOpen] = useState<boolean>(() => {
@@ -423,6 +500,48 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
     setNotesFocus({ nonce: Date.now(), issueId });
     closeIssue();
     navigate('/notes');
+  };
+
+  // Impedimento: a key da API não é admin e a rota /relations.json toma 403 pra ela
+  // (mesmo padrão de grupos/watchers) — em vez da relação formal do Redmine, vincula
+  // por comentário nas duas tarefas (o Redmine já auto-linka "#123" como link clicável).
+  const addNote = useAddNote();
+  const linkBlockerComments = async (
+    blocked: { id: number; subject: string },
+    blocker: { id: number; subject: string },
+  ) => {
+    await Promise.all([
+      addNote.mutateAsync({ id: blocker.id, notes: `⛔ Impede a tarefa #${blocked.id}` }),
+      addNote.mutateAsync({ id: blocked.id, notes: `⛔ Impedida pela tarefa #${blocker.id}` }),
+    ]);
+  };
+  const openCreateBlocker = (issue: { id: number; subject: string }) => {
+    closeIssue();
+    setCreatePrefill({ blockingIssue: issue });
+    setShowCreate(true);
+  };
+  const handleIssueCreated = async (id: number) => {
+    const blocking = createPrefill?.blockingIssue;
+    if (blocking) {
+      try {
+        await linkBlockerComments(blocking, { id, subject: '' });
+      } catch (e) {
+        // A tarefa já foi criada; não deixa a falha do comentário esconder isso.
+        console.warn('[impedimento] falha ao vincular por comentário:', e);
+      }
+    }
+    setCreatePrefill(null);
+    openIssue(id);
+  };
+  const linkBlocker = async (
+    blocked: { id: number; subject: string },
+    blocker: { id: number; subject: string },
+  ) => {
+    try {
+      await linkBlockerComments(blocked, blocker);
+    } catch (e) {
+      console.warn('[impedimento] falha ao vincular tarefa existente:', e);
+    }
   };
 
   usePushNotifications();
@@ -596,6 +715,12 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
     >
       {({ isActive }) => (
         <>
+          {isActive && (
+            <span
+              aria-hidden
+              className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-full bg-blue-600 dark:bg-blue-400"
+            />
+          )}
           <span className="flex-shrink-0 relative">
             {tab.icon}
             {sidebarCollapsed && tab.count !== undefined && tab.count > 0 && (
@@ -757,10 +882,12 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
             <div
               className={`flex items-center gap-2 px-2 py-1.5 mt-0.5 ${sidebarCollapsed ? 'justify-center' : ''}`}
             >
-              <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
-                {user.firstname.charAt(0)}
-                {user.lastname.charAt(0)}
-              </div>
+              <PersonAvatar
+                redmineUserId={user.id}
+                name={`${user.firstname} ${user.lastname}`}
+                size={24}
+                className="text-[10px]"
+              />
               {!sidebarCollapsed && (
                 <span className="flex-1 text-xs text-slate-600 dark:text-slate-400 truncate">
                   {user.firstname} {user.lastname}
@@ -872,7 +999,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
             >
               <Bell size={17} />
               {notifications.length > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center tabular-nums ring-2 ring-white dark:ring-slate-900">
                   {notifications.length > 9 ? '9+' : notifications.length}
                 </span>
               )}
@@ -958,7 +1085,9 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
                             )}
                             {n.snippet && (
                               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">
-                                {n.type === 'mail' || n.type === 'workflow' ? n.snippet : `"${n.snippet}"`}
+                                {n.type === 'mail' || n.type === 'workflow'
+                                  ? n.snippet
+                                  : `"${n.snippet}"`}
                               </p>
                             )}
                             <p className="text-xs text-slate-400 mt-0.5">
@@ -983,226 +1112,232 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
 
         {/* Main content */}
         <main className="flex-1 overflow-auto p-6">
-          <Routes>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/inbox" element={<InboxView onIssueClick={openIssue} />} />
-            <Route path="/dashboard" element={<Dashboard onIssueClick={openIssue} />} />
-            <Route path="/me" element={<MeView onIssueClick={openIssue} />} />
-            <Route
-              path="/flow"
-              element={<FlowView projectId={selectedProject} onIssueClick={openIssue} />}
-            />
-            <Route path="/trends" element={<TrendsView projectId={selectedProject} />} />
-            <Route
-              path="/sla"
-              element={<SlaView projectId={selectedProject} onIssueClick={openIssue} />}
-            />
-            <Route
-              path="/project"
-              element={<ProjectView projectId={selectedProject} onIssueClick={openIssue} />}
-            />
-            <Route path="/myday" element={<MyDayView onIssueClick={openIssue} />} />
-            <Route
-              path="/people"
-              element={
-                <PeopleView
-                  onIssueClick={openIssue}
-                  onOpenTalk={openTalkWithUser}
-                  openingTalkFor={openingTalkFor}
-                />
-              }
-            />
-            <Route path="/team" element={<TeamView onIssueClick={openIssue} />} />
-            <Route path="/release" element={<ReleaseView onIssueClick={openIssue} />} />
-            <Route path="/meetings" element={<MeetingsView onIssueClick={openIssue} />} />
-            <Route
-              path="/notes"
-              element={<NotesView onIssueClick={openIssue} seed={noteSeed} focus={notesFocus} />}
-            />
-            <Route path="/sprints" element={<SprintsView onIssueClick={openIssue} />} />
-            <Route path="/roadmap" element={<RoadmapView onIssueClick={openIssue} />} />
-            <Route path="/assistant" element={<AssistantView onIssueClick={openIssue} />} />
-            <Route path="/mail" element={<MailView />} />
-            <Route path="/wiki" element={<WikiView />} />
-            <Route path="/drive" element={<DriveView />} />
-            <Route path="/timesheet" element={<TimesheetView onIssueClick={openIssue} />} />
-            <Route path="/workflows" element={<WorkflowsView onIssueClick={openIssue} />} />
-            <Route path="/totp" element={<TotpView />} />
-
-            <Route
-              path="/kanban"
-              element={
-                <KanbanBoard
-                  projectId={selectedProject}
-                  userName={user ? `${user.firstname} ${user.lastname}` : undefined}
-                  onIssueClick={openIssue}
-                  focusedIssueId={focusedIssueId ?? undefined}
-                  onProjectChange={setSelectedProject}
-                />
-              }
-            />
-
-            <Route
-              path="/calendar"
-              element={<CalendarView projectId={selectedProject} onIssueClick={openIssue} />}
-            />
-
-            <Route
-              path="/review"
-              element={
-                <div className="max-w-6xl mx-auto">
-                  <div className="mb-4">
-                    <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                      Para revisar
-                    </h2>
-                    <p className="text-sm text-slate-500 mt-0.5">
-                      Tarefas em Pendente Revisão onde você é o revisor — sua fila de revisão.
-                    </p>
-                  </div>
-                  <IssueListView
-                    issues={toReview.data}
-                    isLoading={toReview.isLoading}
-                    isFetching={toReview.isFetching}
-                    onRefetch={toReview.refetch}
+          {/* Fronteira das rotas lazy: o skeleton só aparece no primeiro acesso
+              a cada view (depois o chunk fica em cache do módulo). */}
+          <Suspense fallback={<RouteFallback />}>
+            <Routes>
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/inbox" element={<InboxView onIssueClick={openIssue} />} />
+              <Route path="/dashboard" element={<Dashboard onIssueClick={openIssue} />} />
+              <Route path="/me" element={<MeView onIssueClick={openIssue} />} />
+              <Route
+                path="/flow"
+                element={<FlowView projectId={selectedProject} onIssueClick={openIssue} />}
+              />
+              <Route path="/trends" element={<TrendsView projectId={selectedProject} />} />
+              <Route
+                path="/sla"
+                element={<SlaView projectId={selectedProject} onIssueClick={openIssue} />}
+              />
+              <Route
+                path="/project"
+                element={<ProjectView projectId={selectedProject} onIssueClick={openIssue} />}
+              />
+              <Route path="/myday" element={<MyDayView onIssueClick={openIssue} />} />
+              <Route
+                path="/people"
+                element={
+                  <PeopleView
                     onIssueClick={openIssue}
-                    showAssignee
-                    emptyMessage="Nenhuma tarefa aguardando sua revisão."
-                    focusedIssueId={focusedIssueId ?? undefined}
+                    onOpenTalk={openTalkWithUser}
+                    openingTalkFor={openingTalkFor}
                   />
-                </div>
-              }
-            />
+                }
+              />
+              <Route path="/team" element={<TeamView onIssueClick={openIssue} />} />
+              <Route path="/release" element={<ReleaseView onIssueClick={openIssue} />} />
+              <Route path="/meetings" element={<MeetingsView onIssueClick={openIssue} />} />
+              <Route
+                path="/notes"
+                element={<NotesView onIssueClick={openIssue} seed={noteSeed} focus={notesFocus} />}
+              />
+              <Route path="/sprints" element={<SprintsView onIssueClick={openIssue} />} />
+              <Route path="/roadmap" element={<RoadmapView onIssueClick={openIssue} />} />
+              <Route path="/assistant" element={<AssistantView onIssueClick={openIssue} />} />
+              <Route path="/mail" element={<MailView />} />
+              <Route path="/wiki" element={<WikiView />} />
+              <Route path="/drive" element={<DriveView />} />
+              <Route path="/timesheet" element={<TimesheetView onIssueClick={openIssue} />} />
+              <Route path="/workflows" element={<WorkflowsView onIssueClick={openIssue} />} />
+              <Route path="/totp" element={<TotpView />} />
 
-            <Route
-              path="/test"
-              element={
-                <div className="max-w-6xl mx-auto">
-                  <div className="mb-4">
-                    <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                      Para testar
-                    </h2>
-                    <p className="text-sm text-slate-500 mt-0.5">Suas tarefas em Pendente Teste.</p>
-                  </div>
-                  <IssueListView
-                    issues={toTest}
-                    isLoading={issuesQuery.isLoading}
-                    isFetching={issuesQuery.isFetching}
-                    onRefetch={issuesQuery.refetch}
+              <Route
+                path="/kanban"
+                element={
+                  <KanbanBoard
+                    projectId={selectedProject}
+                    userName={user ? `${user.firstname} ${user.lastname}` : undefined}
                     onIssueClick={openIssue}
-                    emptyMessage="Nenhuma tarefa aguardando teste com você."
                     focusedIssueId={focusedIssueId ?? undefined}
+                    onProjectChange={setSelectedProject}
                   />
-                </div>
-              }
-            />
+                }
+              />
 
-            <Route
-              path="/integrate"
-              element={
-                <div className="max-w-6xl mx-auto">
-                  <div className="mb-4">
-                    <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                      Para integrar
-                    </h2>
-                    <p className="text-sm text-slate-500 mt-0.5">
-                      Suas tarefas em Pendente Integração.
-                    </p>
+              <Route
+                path="/calendar"
+                element={<CalendarView projectId={selectedProject} onIssueClick={openIssue} />}
+              />
+
+              <Route
+                path="/review"
+                element={
+                  <div className="max-w-6xl mx-auto">
+                    <div className="mb-4">
+                      <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                        Para revisar
+                      </h2>
+                      <p className="text-sm text-slate-500 mt-0.5">
+                        Tarefas em Pendente Revisão onde você é o revisor — sua fila de revisão.
+                      </p>
+                    </div>
+                    <IssueListView
+                      issues={toReview.data}
+                      isLoading={toReview.isLoading}
+                      isFetching={toReview.isFetching}
+                      onRefetch={toReview.refetch}
+                      onIssueClick={openIssue}
+                      showAssignee
+                      emptyMessage="Nenhuma tarefa aguardando sua revisão."
+                      focusedIssueId={focusedIssueId ?? undefined}
+                    />
                   </div>
-                  <IssueListView
-                    issues={toIntegrate}
-                    isLoading={issuesQuery.isLoading}
-                    isFetching={issuesQuery.isFetching}
-                    onRefetch={issuesQuery.refetch}
-                    onIssueClick={openIssue}
-                    emptyMessage="Nenhuma tarefa aguardando integração com você."
-                    focusedIssueId={focusedIssueId ?? undefined}
-                  />
-                </div>
-              }
-            />
+                }
+              />
 
-            <Route
-              path="/monitoring"
-              element={
-                <div className="max-w-6xl mx-auto">
-                  <div className="mb-4">
-                    <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                      Monitoramento
-                    </h2>
-                    <p className="text-sm text-slate-500 mt-0.5">
-                      Tarefas onde você é o desenvolvedor mas estão com outro responsável — em
-                      revisão, teste, integração etc.
-                    </p>
+              <Route
+                path="/test"
+                element={
+                  <div className="max-w-6xl mx-auto">
+                    <div className="mb-4">
+                      <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                        Para testar
+                      </h2>
+                      <p className="text-sm text-slate-500 mt-0.5">
+                        Suas tarefas em Pendente Teste.
+                      </p>
+                    </div>
+                    <IssueListView
+                      issues={toTest}
+                      isLoading={issuesQuery.isLoading}
+                      isFetching={issuesQuery.isFetching}
+                      onRefetch={issuesQuery.refetch}
+                      onIssueClick={openIssue}
+                      emptyMessage="Nenhuma tarefa aguardando teste com você."
+                      focusedIssueId={focusedIssueId ?? undefined}
+                    />
                   </div>
-                  <IssueListView
-                    issues={monitored.data}
-                    isLoading={monitored.isLoading}
-                    isFetching={monitored.isFetching}
-                    onRefetch={monitored.refetch}
-                    onIssueClick={openIssue}
-                    showAssignee
-                    emptyMessage="Nenhuma tarefa em monitoramento."
-                    focusedIssueId={focusedIssueId ?? undefined}
-                  />
-                </div>
-              }
-            />
+                }
+              />
 
-            <Route
-              path="/authored"
-              element={
-                <div className="max-w-6xl mx-auto">
-                  <div className="mb-4">
-                    <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                      Criadas por mim
-                    </h2>
-                    <p className="text-sm text-slate-500 mt-0.5">
-                      Tarefas que você abriu e ainda estão abertas, independentemente de quem está
-                      responsável.
-                    </p>
+              <Route
+                path="/integrate"
+                element={
+                  <div className="max-w-6xl mx-auto">
+                    <div className="mb-4">
+                      <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                        Para integrar
+                      </h2>
+                      <p className="text-sm text-slate-500 mt-0.5">
+                        Suas tarefas em Pendente Integração.
+                      </p>
+                    </div>
+                    <IssueListView
+                      issues={toIntegrate}
+                      isLoading={issuesQuery.isLoading}
+                      isFetching={issuesQuery.isFetching}
+                      onRefetch={issuesQuery.refetch}
+                      onIssueClick={openIssue}
+                      emptyMessage="Nenhuma tarefa aguardando integração com você."
+                      focusedIssueId={focusedIssueId ?? undefined}
+                    />
                   </div>
-                  <IssueListView
-                    issues={authored.data}
-                    isLoading={authored.isLoading}
-                    isFetching={authored.isFetching}
-                    onRefetch={authored.refetch}
-                    onIssueClick={openIssue}
-                    showAssignee
-                    emptyMessage="Você não tem tarefas abertas criadas por você."
-                    focusedIssueId={focusedIssueId ?? undefined}
-                  />
-                </div>
-              }
-            />
+                }
+              />
 
-            <Route
-              path="/watched"
-              element={
-                <div className="max-w-6xl mx-auto">
-                  <div className="mb-4">
-                    <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                      Observadas
-                    </h2>
-                    <p className="text-sm text-slate-500 mt-0.5">
-                      Tarefas que você acompanha como watcher, mesmo sem ser o responsável.
-                    </p>
+              <Route
+                path="/monitoring"
+                element={
+                  <div className="max-w-6xl mx-auto">
+                    <div className="mb-4">
+                      <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                        Monitoramento
+                      </h2>
+                      <p className="text-sm text-slate-500 mt-0.5">
+                        Tarefas onde você é o desenvolvedor mas estão com outro responsável — em
+                        revisão, teste, integração etc.
+                      </p>
+                    </div>
+                    <IssueListView
+                      issues={monitored.data}
+                      isLoading={monitored.isLoading}
+                      isFetching={monitored.isFetching}
+                      onRefetch={monitored.refetch}
+                      onIssueClick={openIssue}
+                      showAssignee
+                      emptyMessage="Nenhuma tarefa em monitoramento."
+                      focusedIssueId={focusedIssueId ?? undefined}
+                    />
                   </div>
-                  <IssueListView
-                    issues={watched.data}
-                    isLoading={watched.isLoading}
-                    isFetching={watched.isFetching}
-                    onRefetch={watched.refetch}
-                    onIssueClick={openIssue}
-                    showAssignee
-                    emptyMessage="Você não está observando nenhuma tarefa."
-                    focusedIssueId={focusedIssueId ?? undefined}
-                  />
-                </div>
-              }
-            />
+                }
+              />
 
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
+              <Route
+                path="/authored"
+                element={
+                  <div className="max-w-6xl mx-auto">
+                    <div className="mb-4">
+                      <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                        Criadas por mim
+                      </h2>
+                      <p className="text-sm text-slate-500 mt-0.5">
+                        Tarefas que você abriu e ainda estão abertas, independentemente de quem está
+                        responsável.
+                      </p>
+                    </div>
+                    <IssueListView
+                      issues={authored.data}
+                      isLoading={authored.isLoading}
+                      isFetching={authored.isFetching}
+                      onRefetch={authored.refetch}
+                      onIssueClick={openIssue}
+                      showAssignee
+                      emptyMessage="Você não tem tarefas abertas criadas por você."
+                      focusedIssueId={focusedIssueId ?? undefined}
+                    />
+                  </div>
+                }
+              />
+
+              <Route
+                path="/watched"
+                element={
+                  <div className="max-w-6xl mx-auto">
+                    <div className="mb-4">
+                      <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                        Observadas
+                      </h2>
+                      <p className="text-sm text-slate-500 mt-0.5">
+                        Tarefas que você acompanha como watcher, mesmo sem ser o responsável.
+                      </p>
+                    </div>
+                    <IssueListView
+                      issues={watched.data}
+                      isLoading={watched.isLoading}
+                      isFetching={watched.isFetching}
+                      onRefetch={watched.refetch}
+                      onIssueClick={openIssue}
+                      showAssignee
+                      emptyMessage="Você não está observando nenhuma tarefa."
+                      focusedIssueId={focusedIssueId ?? undefined}
+                    />
+                  </div>
+                }
+              />
+
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            </Routes>
+          </Suspense>
         </main>
       </div>
 
@@ -1217,6 +1352,8 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
             openNewNote(patch);
           }}
           onViewNotes={openTaskNotes}
+          onCreateBlocker={openCreateBlocker}
+          onLinkBlocker={linkBlocker}
           onOpenTalk={openTalkWithUser}
           openingTalkFor={openingTalkFor}
         />
@@ -1278,40 +1415,47 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         onSelectIssue={openIssue}
       />
 
-      {showCreate && (
-        <CreateIssueModal
-          onClose={() => {
-            setShowCreate(false);
-            setCreatePrefill(null);
-          }}
-          initialSubject={createPrefill?.subject}
-          initialDescription={createPrefill?.description}
-          initialPriorityId={createPrefill?.priorityId}
-          initialDueDate={createPrefill?.dueDate}
+      {/* Modais e o painel do Talk são lazy: fallback null porque já são
+          overlays sob demanda — um skeleton aqui piscaria sem motivo. */}
+      <Suspense fallback={null}>
+        {showCreate && (
+          <CreateIssueModal
+            onClose={() => {
+              setShowCreate(false);
+              setCreatePrefill(null);
+            }}
+            initialSubject={createPrefill?.subject}
+            initialDescription={createPrefill?.description}
+            initialPriorityId={createPrefill?.priorityId}
+            initialDueDate={createPrefill?.dueDate}
+            onCreated={handleIssueCreated}
+            blockingIssue={createPrefill?.blockingIssue}
+          />
+        )}
+
+        <UpdateBanner />
+        {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+
+        {showStandup && (
+          <StandupModal
+            issues={allIssues ?? []}
+            completedIssues={completed.data ?? []}
+            onClose={() => setShowStandup(false)}
+          />
+        )}
+
+        {showDigest && <DigestModal onClose={() => setShowDigest(false)} />}
+        {showQuickAdd && <QuickAddModal onClose={() => setShowQuickAdd(false)} />}
+        {showTemplates && <TemplatesModal onClose={() => setShowTemplates(false)} />}
+
+        <TalkChat
+          onIssueClick={openIssue}
+          onOpenPerson={(redmineId) => navigate(`/people?person=${redmineId}`)}
+          openRoomToken={pendingTalkToken}
+          onRoomOpened={() => setPendingTalkToken(null)}
+          onOpenSettings={() => setShowSettings(true)}
         />
-      )}
-
-      <UpdateBanner />
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
-
-      {showStandup && (
-        <StandupModal
-          issues={allIssues ?? []}
-          completedIssues={completed.data ?? []}
-          onClose={() => setShowStandup(false)}
-        />
-      )}
-
-      {showDigest && <DigestModal onClose={() => setShowDigest(false)} />}
-      {showQuickAdd && <QuickAddModal onClose={() => setShowQuickAdd(false)} />}
-      {showTemplates && <TemplatesModal onClose={() => setShowTemplates(false)} />}
-
-      <TalkChat
-        onIssueClick={openIssue}
-        openRoomToken={pendingTalkToken}
-        onRoomOpened={() => setPendingTalkToken(null)}
-        onOpenSettings={() => setShowSettings(true)}
-      />
+      </Suspense>
 
       {/* Sessão de foco (Pomodoro) com auto-apontamento */}
       <FocusWidget />

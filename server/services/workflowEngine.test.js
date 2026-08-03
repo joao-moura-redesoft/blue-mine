@@ -82,9 +82,33 @@ describe('runGraph — ação notify', () => {
     // nem deixar de registrar o conteúdo (é o que alimenta o sino in-app).
     await runGraph(wf, wf.nodes[0], ctx(), rec, noop, [], { run: r });
     expect(r.actions).toEqual([
-      { type: 'notify', ok: true, title: 'Tarefa parada', body: 'Sem atividade há 5 dias', issueId: 1 },
+      {
+        type: 'notify',
+        ok: true,
+        title: 'Tarefa parada',
+        body: 'Sem atividade há 5 dias',
+        issueId: 1,
+      },
     ]);
     expect(r.nodes.n).toBe('ok');
+  });
+
+  it('resolve {{issue.updated_days}} — campo derivado, não vem cru do Redmine', async () => {
+    const dynamic = notify('n');
+    dynamic.config = { title: 'Parada', body: 'Sem atividade há {{issue.updated_days}} dias' };
+    const wf = { id: 'w', nodes: [{ ...trigger, nextIds: ['n'] }, dynamic] };
+    const r = run();
+    const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+    await runGraph(
+      wf,
+      wf.nodes[0],
+      ctx({ issue: { id: 1, subject: 'X', status: { id: 3 }, updated_on: fiveDaysAgo } }),
+      rec,
+      noop,
+      [],
+      { run: r },
+    );
+    expect(r.actions[0].body).toBe('Sem atividade há 5 dias');
   });
 });
 

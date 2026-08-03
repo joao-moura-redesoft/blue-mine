@@ -20,11 +20,54 @@ export function getTalkAuth(): TalkAuth | null {
 }
 
 export function saveTalkAuth(auth: TalkAuth) {
+  const previous = getTalkAuth();
   localStorage.setItem(TALK_AUTH_KEY, JSON.stringify(auth));
+  // Trocou de conta? O actorId em cache é de outra pessoa e deixaria as bolhas
+  // do lado errado até /talk/me responder. Ver getCachedTalkUid.
+  if (previous && (previous.user !== auth.user || previous.url !== auth.url)) clearCachedTalkUid();
+  window.dispatchEvent(new CustomEvent(TALK_AUTH_CHANGED_EVENT));
+}
+
+// ─── Identidade no Talk (actorId) ────────────────────────────────────────────
+// O `actorId` das mensagens NÃO é o login: neste Nextcloud (contas via LDAP) ele
+// é um UUID, ex. "81CBD76B-8020-…". É por ele que decidimos se a mensagem é
+// minha (bolha à direita), então errar aqui joga TODAS as minhas mensagens para
+// o lado de quem recebeu.
+//
+// Guardamos o id assim que ele é conhecido — por /talk/me ou pelo actorId de uma
+// mensagem que acabamos de enviar (fonte irrefutável) — para que uma falha
+// pontual de /talk/me não deixe a conversa inteira com o lado invertido.
+const TALK_UID_KEY = 'nextcloud_talk_uid';
+
+export function getCachedTalkUid(): string {
+  try {
+    return localStorage.getItem(TALK_UID_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function cacheTalkUid(id: string) {
+  if (!id) return;
+  try {
+    if (localStorage.getItem(TALK_UID_KEY) !== id) localStorage.setItem(TALK_UID_KEY, id);
+  } catch {
+    /* storage indisponível — seguimos com o valor em memória da query */
+  }
+}
+
+export function clearCachedTalkUid() {
+  try {
+    localStorage.removeItem(TALK_UID_KEY);
+  } catch {
+    /* nada a fazer */
+  }
 }
 
 export async function clearTalkAuth() {
   localStorage.removeItem(TALK_AUTH_KEY);
+  clearCachedTalkUid();
+  window.dispatchEvent(new CustomEvent(TALK_AUTH_CHANGED_EVENT));
   try {
     await axios.delete('/api/talk/auth');
   } catch {
@@ -104,15 +147,43 @@ export interface NCUser {
 
 const api = axios.create({ baseURL: '/api/talk' });
 
-// Disparado quando o servidor responde 401 a uma chamada do Talk — sinal de que o token
-// (senha de app) foi revogado/expirou. 403 é "sem permissão" (conta não-admin, esperado)
-// e NÃO conta. Quem ouve isso (TalkChat) mostra o aviso de reconexão.
+// Disparado quando o servidor responde 401 a uma chamada do Talk. 403 é "sem
+// permissão" (conta não-admin, esperado) e NÃO conta. Quem ouve isso (TalkChat)
+// mostra o aviso de reconexão.
 export const TALK_AUTH_EXPIRED_EVENT = 'rk-talk-auth-expired';
+
+// Disparado quando a conta do Talk é (re)vinculada ou removida. Sem isto, o
+// TalkChat continua com as queries desabilitadas e o aviso na tela mesmo depois
+// de reconectar — só voltava recarregando a página.
+export const TALK_AUTH_CHANGED_EVENT = 'rk-talk-auth-changed';
+
+/**
+ * Causa do último 401 do Talk, na palavra do servidor.
+ *
+ * O mesmo 401 sai em situações bem diferentes — token revogado, sessão do
+ * Redmine expirada, conta nunca vinculada — e o servidor já as distingue em
+ * `makeTalk`. Repassar o texto evita o diagnóstico genérico "o token foi
+ * revogado", que costumava estar errado.
+ */
+export type TalkAuthFailure = { reason: string; redmineSession: boolean };
+
+let lastAuthFailure: TalkAuthFailure = { reason: '', redmineSession: false };
+
+export function getTalkAuthFailure(): TalkAuthFailure {
+  return lastAuthFailure;
+}
 
 api.interceptors.response.use(
   (r) => r,
   (err) => {
     if (err?.response?.status === 401 && getTalkAuth()) {
+      const reason = String(err.response?.data?.error || '');
+      lastAuthFailure = {
+        reason,
+        // A sessão do Redmine caiu: reconectar o Talk não resolve nada, o
+        // usuário precisa entrar no app de novo.
+        redmineSession: /redmine|não autenticado/i.test(reason),
+      };
       window.dispatchEvent(new CustomEvent(TALK_AUTH_EXPIRED_EVENT));
     }
     return Promise.reject(err);
@@ -376,10 +447,14 @@ export interface RedmineTalkMatch {
 export interface RedmineTalkMatchMap {
   updatedAt: number;
   byRedmineId: Record<string, RedmineTalkMatch>;
+  /** Índice reverso: ncUid (usuário do Talk) → id do usuário no Redmine */
+  byNcUid: Record<string, number>;
 }
 
-export async function fetchRedmineTalkMatch(): Promise<RedmineTalkMatchMap> {
-  const { data } = await api.get<RedmineTalkMatchMap>('/redmine-match');
+export async function fetchRedmineTalkMatch(forceRefresh = false): Promise<RedmineTalkMatchMap> {
+  const { data } = await api.get<RedmineTalkMatchMap>('/redmine-match', {
+    params: forceRefresh ? { refresh: '1' } : undefined,
+  });
   return data;
 }
 
@@ -439,6 +514,18 @@ export interface UploadResult {
   method?: string;
   error?: string;
   uploadedPath?: string;
+}
+
+// Mesmo limite do express.raw em server/routes/talk.js (POST /talk/rooms/:token/upload).
+// Checar no cliente evita subir o arquivo inteiro (às vezes minutos numa rede lenta)
+// só pra descobrir no fim que o servidor ia rejeitar com 413.
+export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+
+export function uploadErrorMessage(err: unknown): string {
+  if (axios.isAxiosError(err) && err.response?.status === 413) {
+    return 'Arquivo muito grande (máx. 100MB).';
+  }
+  return (err instanceof Error ? err.message : null) || 'Falha ao enviar arquivo.';
 }
 
 export async function uploadFileToTalk(

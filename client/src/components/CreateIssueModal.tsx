@@ -10,6 +10,7 @@ import {
   BookTemplate,
   Trash2,
   Save,
+  Ban,
 } from 'lucide-react';
 import {
   getTemplates,
@@ -28,6 +29,13 @@ import {
 import { redmineApi } from '../api/redmine';
 import { markdownToTextile } from '../utils/markdownToTextile';
 import { getAIKey } from '../utils/aiConfig';
+import {
+  errorStatus,
+  errorList,
+  errorDetail,
+  errorMessage,
+  isNetworkError,
+} from '../utils/httpError';
 
 interface Props {
   onClose: () => void;
@@ -39,6 +47,12 @@ interface Props {
   initialDueDate?: string;
   // Anexos já resolvidos (ex.: imagem de uma mensagem do Talk).
   initialFiles?: File[];
+  // Chamado com o id da tarefa recém-criada — dá pra abrir o modal dela em seguida
+  // (feedback visual de que a criação funcionou, em vez de só fechar sem mais nada).
+  onCreated?: (id: number) => void;
+  // Só pra exibição: a tarefa que esta aqui vai impedir (o vínculo em si — por
+  // comentário nas duas — é feito por quem chama, depois do onCreated).
+  blockingIssue?: { id: number; subject: string };
 }
 
 function fmtSize(bytes: number): string {
@@ -54,6 +68,8 @@ export function CreateIssueModal({
   initialPriorityId,
   initialDueDate,
   initialFiles,
+  onCreated,
+  blockingIssue,
 }: Props) {
   const { data: projects } = useProjects();
   const { data: trackers } = useTrackers();
@@ -131,10 +147,10 @@ export function CreateIssueModal({
     }
   };
 
-  const handleApiError = (err: any) => {
-    const status: number | undefined = err?.response?.status;
-    const redmineErrors: string[] = err?.response?.data?.errors;
-    if (redmineErrors?.length) return setError(redmineErrors.join('\n'));
+  const handleApiError = (err: unknown) => {
+    const status = errorStatus(err);
+    const redmineErrors = errorList(err);
+    if (redmineErrors) return setError(redmineErrors.join('\n'));
     if (status === 403) {
       setError('Sem permissão para criar tarefas neste projeto.');
       setForceCreate(true);
@@ -143,9 +159,8 @@ export function CreateIssueModal({
     if (status === 422)
       return setError('O Redmine rejeitou a tarefa. Verifique os campos obrigatórios do projeto.');
     if (status === 404) return setError('Projeto não encontrado. Tente recarregar a página.');
-    if (!navigator.onLine || err?.code === 'ERR_NETWORK')
-      return setError('Sem conexão com o servidor.');
-    setError(err?.response?.data?.error ?? err?.message ?? 'Erro desconhecido ao criar a tarefa.');
+    if (!navigator.onLine || isNetworkError(err)) return setError('Sem conexão com o servidor.');
+    setError(errorDetail(err) ?? errorMessage(err) ?? 'Erro desconhecido ao criar a tarefa.');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -155,9 +170,10 @@ export function CreateIssueModal({
     setForceCreate(false);
     setUploading(true);
     try {
-      await createIssue.mutateAsync(await buildPayload(projectId as number));
+      const created = await createIssue.mutateAsync(await buildPayload(projectId as number));
       onClose();
-    } catch (err: any) {
+      onCreated?.(created.id);
+    } catch (err) {
       handleApiError(err);
     } finally {
       setUploading(false);
@@ -178,7 +194,8 @@ export function CreateIssueModal({
       // Invalida só depois que a tarefa já está no projeto certo
       await qc.invalidateQueries({ queryKey: ['issues'] });
       onClose();
-    } catch (err: any) {
+      onCreated?.(created.id);
+    } catch (err) {
       handleApiError(err);
     } finally {
       setUploading(false);
@@ -187,7 +204,7 @@ export function CreateIssueModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop"
       onClick={onClose}
     >
       <div
@@ -205,6 +222,19 @@ export function CreateIssueModal({
             <X size={18} className="text-slate-500 dark:text-slate-400" />
           </button>
         </div>
+
+        {blockingIssue && (
+          <div className="flex items-start gap-2 mx-5 mt-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2.5 text-sm text-red-700 dark:text-red-300">
+            <Ban size={15} className="mt-0.5 flex-shrink-0" />
+            <p>
+              Vai impedir a tarefa{' '}
+              <span className="font-semibold">
+                #{blockingIssue.id} {blockingIssue.subject}
+              </span>
+              . Ao criar, um comentário linkando as duas é postado automaticamente.
+            </p>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           <div>

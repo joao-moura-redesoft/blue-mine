@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, lazy, Suspense } from 'react';
 import {
   X,
   ExternalLink,
@@ -37,6 +37,7 @@ import {
   Video,
   PanelLeftClose,
   PanelLeftOpen,
+  Ban,
 } from 'lucide-react';
 import type { Attachment, EditField, Issue } from '../types/redmine';
 import { RequiredFieldsModal } from './RequiredFieldsModal';
@@ -46,12 +47,13 @@ import { localChecklists, useChecklist } from '../utils/localChecklists';
 import { TimeTracker } from './TimeTracker';
 import { IssueAIPanel } from './IssueAIPanel';
 import { CommentComposer } from './CommentComposer';
+import { IssueLinker } from './IssueLinker';
 import { TalkContactButton } from './TalkContactButton';
 import { PersonAvatar } from './PersonAvatar';
 import { MarkdownEditor } from './MarkdownEditor';
 import { markdownToTextile } from '../utils/markdownToTextile';
 import { textileToMarkdown } from '../utils/textileToMarkdown';
-import { redmineApi, attachmentUrl } from '../api/redmine';
+import { redmineApi, attachmentUrl, getStoredAuth } from '../api/redmine';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
@@ -72,11 +74,20 @@ import { useJitsi } from './jitsi/JitsiContext';
 import { useJitsiPresence } from '../hooks/useJitsiPresence';
 import { makeTaskRoom } from '../utils/jitsiConfig';
 import { wikiLinks, type WikiLink } from '../utils/wikiLinks';
-import { WikiLinkSearch } from './WikiView';
 import { Markdown } from './Markdown';
 import { ActivityLog, JournalAttachments } from './ActivityLog';
 import { ManualWorkflowButton } from './workflow/ManualWorkflowButton';
 import { getMissingFields } from '../utils/alerts';
+import { createRoom, sendMessage } from '../api/talk';
+import { useTalkRedmineMatch } from '../hooks/useTalk';
+import { dokuwikiPageUrl, redmineIssueUrl } from '../utils/appDefaults';
+
+// Lazy: enquanto este import era estático, o módulo voltava para o chunk
+// principal e anulava o lazy() do App.tsx — o Vite avisa no build com
+// "dynamic import will not move module into another chunk".
+const WikiLinkSearch = lazy(() =>
+  import('./WikiView').then((m) => ({ default: m.WikiLinkSearch })),
+);
 
 function isClosedName(name: string): boolean {
   const n = name.toLowerCase();
@@ -218,6 +229,13 @@ interface Props {
   onNewNote?: (patch: { title?: string; linkedIssueId?: number; linkedProjectId?: number }) => void;
   /** Abre o módulo de Notas filtrado por esta tarefa */
   onViewNotes?: (issueId: number) => void;
+  /** Abre o criador de tarefa pré-configurado como impedimento desta tarefa */
+  onCreateBlocker?: (issue: { id: number; subject: string }) => void;
+  /** Vincula (por comentário nas duas) uma tarefa JÁ EXISTENTE como impedimento */
+  onLinkBlocker?: (
+    blocked: { id: number; subject: string },
+    blocker: { id: number; subject: string },
+  ) => Promise<void>;
   /** Abre (ou cria) a conversa 1:1 no Talk com o usuário do Nextcloud dado */
   onOpenTalk?: (ncUid: string) => void;
   /** ncUid da conversa sendo aberta agora (spinner no botão), ou null */
@@ -568,7 +586,8 @@ function TextField({
     const shared = {
       ref,
       value: draft,
-      onChange: (e: React.ChangeEvent<any>) => setDraft(e.target.value),
+      onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+        setDraft(e.target.value),
       onBlur: commit,
       onKeyDown: (e: React.KeyboardEvent) => {
         if (e.key === 'Escape') {
@@ -1153,11 +1172,12 @@ function SendToReviewCTA({
   currentRevisor: string;
   currentDate: string;
   members: { id: number; name: string }[];
-  onConfirm: (revisorId: string, date: string) => void;
+  onConfirm: (revisorId: string, date: string, notifyTalk: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [revisor, setRevisor] = useState(currentRevisor);
   const [date, setDate] = useState(currentDate || new Date().toISOString().split('T')[0]);
+  const [notifyTalk, setNotifyTalk] = useState(true);
 
   if (!open) {
     return (
@@ -1209,6 +1229,15 @@ function SendToReviewCTA({
           />
         </div>
       </div>
+      <label className="flex items-center gap-1.5 text-xs text-purple-700 dark:text-purple-300 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={notifyTalk}
+          onChange={(e) => setNotifyTalk(e.target.checked)}
+          className="h-3.5 w-3.5 accent-purple-600"
+        />
+        Avisar no Talk
+      </label>
       <div className="flex gap-2 justify-end">
         <button
           onClick={() => setOpen(false)}
@@ -1219,7 +1248,7 @@ function SendToReviewCTA({
         <button
           onClick={() => {
             if (revisor && date) {
-              onConfirm(revisor, date);
+              onConfirm(revisor, date, notifyTalk);
               setOpen(false);
             }
           }}
@@ -1248,12 +1277,13 @@ function ReviewDecisionCTA({
   members: { id: number; name: string }[];
   canApprove: boolean;
   canReject: boolean;
-  onApprove: (note: string) => void;
-  onReject: (assigneeId: string, note: string) => void;
+  onApprove: (note: string, notifyTalk: boolean) => void;
+  onReject: (assigneeId: string, note: string, notifyTalk: boolean) => void;
 }) {
   const [mode, setMode] = useState<null | 'approve' | 'reject'>(null);
   const [assignee, setAssignee] = useState(developerId);
   const [note, setNote] = useState('');
+  const [notifyTalk, setNotifyTalk] = useState(true);
 
   if (mode === 'approve') {
     return (
@@ -1274,6 +1304,15 @@ function ReviewDecisionCTA({
             className="w-full text-sm border border-green-300 dark:border-green-700 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 bg-white dark:bg-slate-800 resize-none"
           />
         </div>
+        <label className="flex items-center gap-1.5 text-xs text-green-700 dark:text-green-300 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={notifyTalk}
+            onChange={(e) => setNotifyTalk(e.target.checked)}
+            className="h-3.5 w-3.5 accent-green-600"
+          />
+          Avisar no Talk
+        </label>
         <div className="flex gap-2 justify-end">
           <button
             onClick={() => setMode(null)}
@@ -1283,7 +1322,7 @@ function ReviewDecisionCTA({
           </button>
           <button
             onClick={() => {
-              if (note.trim()) onApprove(note.trim());
+              if (note.trim()) onApprove(note.trim(), notifyTalk);
             }}
             disabled={!note.trim()}
             className="text-xs bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-3 py-1 rounded-md font-medium transition-colors"
@@ -1330,6 +1369,15 @@ function ReviewDecisionCTA({
             className="w-full text-sm border border-amber-300 dark:border-amber-700 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white dark:bg-slate-800 resize-none"
           />
         </div>
+        <label className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={notifyTalk}
+            onChange={(e) => setNotifyTalk(e.target.checked)}
+            className="h-3.5 w-3.5 accent-amber-600"
+          />
+          Avisar no Talk
+        </label>
         <div className="flex gap-2 justify-end">
           <button
             onClick={() => setMode(null)}
@@ -1339,7 +1387,7 @@ function ReviewDecisionCTA({
           </button>
           <button
             onClick={() => {
-              if (assignee) onReject(assignee, note);
+              if (assignee) onReject(assignee, note, notifyTalk);
             }}
             disabled={!assignee}
             className="text-xs bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white px-3 py-1 rounded-md font-medium transition-colors"
@@ -1655,7 +1703,7 @@ function WikiLinksSection({ issueId }: { issueId: number }) {
               )}
             </span>
             <a
-              href={`https://wiki.redesoft.com.br/doku.php?id=${encodeURIComponent(link.id)}`}
+              href={dokuwikiPageUrl(link.id)}
               target="_blank"
               rel="noreferrer"
               className="text-slate-300 dark:text-slate-600 hover:text-blue-500 dark:hover:text-blue-400 flex-shrink-0 transition-colors"
@@ -1674,9 +1722,105 @@ function WikiLinksSection({ issueId }: { issueId: number }) {
         ))}
       </div>
 
-      {showSearch && (
-        <WikiLinkSearch onSelect={handleSelect} onClose={() => setShowSearch(false)} />
+      <Suspense fallback={null}>
+        {showSearch && (
+          <WikiLinkSearch onSelect={handleSelect} onClose={() => setShowSearch(false)} />
+        )}
+      </Suspense>
+    </div>
+  );
+}
+
+/* ── Impedimento: criar tarefa nova ou vincular uma já existente ── */
+function BlockerButton({
+  issue,
+  onCreateBlocker,
+  onLinkBlocker,
+}: {
+  issue: { id: number; subject: string };
+  onCreateBlocker?: (issue: { id: number; subject: string }) => void;
+  onLinkBlocker?: (
+    blocked: { id: number; subject: string },
+    blocker: { id: number; subject: string },
+  ) => Promise<void>;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [linkerOpen, setLinkerOpen] = useState(false);
+  const [linking, setLinking] = useState(false);
+  const [linkedOk, setLinkedOk] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handlePick = async (picked: { id: number; subject: string }) => {
+    setLinkerOpen(false);
+    if (!onLinkBlocker) return;
+    setLinking(true);
+    try {
+      await onLinkBlocker(issue, picked);
+      setLinkedOk(true);
+      setTimeout(() => setLinkedOk(false), 2000);
+    } finally {
+      setLinking(false);
+    }
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setMenuOpen((v) => !v)}
+        disabled={linking}
+        title="Registrar impedimento"
+        className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-60 ${
+          linkedOk
+            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+            : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+        }`}
+      >
+        {linking ? (
+          <Loader2 size={13} className="animate-spin" />
+        ) : linkedOk ? (
+          <Check size={13} />
+        ) : (
+          <Ban size={13} />
+        )}
+        {linking ? 'Vinculando…' : linkedOk ? 'Vinculado!' : 'Impedimento'}
+      </button>
+
+      {menuOpen && (
+        <div className="absolute right-0 top-full mt-1 w-56 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl z-20 py-1">
+          {onCreateBlocker && (
+            <button
+              onClick={() => {
+                setMenuOpen(false);
+                onCreateBlocker(issue);
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 text-left transition-colors"
+            >
+              <Plus size={12} className="text-slate-400 flex-shrink-0" /> Criar tarefa nova
+            </button>
+          )}
+          {onLinkBlocker && (
+            <button
+              onClick={() => {
+                setMenuOpen(false);
+                setLinkerOpen(true);
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 text-left transition-colors"
+            >
+              <Link2 size={12} className="text-slate-400 flex-shrink-0" /> Vincular tarefa existente
+            </button>
+          )}
+        </div>
       )}
+
+      {linkerOpen && <IssueLinker onClose={() => setLinkerOpen(false)} onPick={handlePick} />}
     </div>
   );
 }
@@ -1689,6 +1833,8 @@ export function IssueModal({
   onNavigate,
   onNewNote,
   onViewNotes,
+  onCreateBlocker,
+  onLinkBlocker,
   onOpenTalk,
   openingTalkFor,
 }: Props) {
@@ -1697,9 +1843,27 @@ export function IssueModal({
   useEffect(() => {
     if (issue)
       recordRecentIssue({ id: issue.id, subject: issue.subject, status: issue.status.name });
+    // Deps granulares de propósito: `issue` troca de identidade a cada refetch
+    // e re-registraria a tarefa como "recente" sem nada ter mudado.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [issue?.id, issue?.subject, issue?.status.name]);
   const { data: statuses } = useStatuses();
   const { data: currentUser } = useCurrentUser();
+  const { data: talkMatches } = useTalkRedmineMatch();
+  // Avisa uma pessoa no Talk por vínculo de nome — melhor esforço, silencioso se não
+  // houver vínculo ou se a conta não puder iniciar conversa com ela (mesma restrição
+  // de visibilidade do Nextcloud documentada em [[talk-redmine-name-match]]). Nunca
+  // trava o fluxo principal (handoff de revisão / @menção) por causa disso.
+  const notifyOnTalk = async (redmineId: number, message: string) => {
+    const match = talkMatches?.byRedmineId?.[String(redmineId)];
+    if (!match?.ncUid) return;
+    try {
+      const room = await createRoom(1, match.ncUid);
+      await sendMessage(room.token, message);
+    } catch {
+      /* melhor esforço */
+    }
+  };
   const { startCall: startJitsiCall, activeCall: activeJitsiCall } = useJitsi();
   const { isLive: isRoomLive, liveRoom } = useJitsiPresence();
   // Transições permitidas: nativo (Redmine 5+) tem prioridade; senão busca sob
@@ -1827,6 +1991,18 @@ export function IssueModal({
       // Compartilha arquivos na sala Talk ativa (se houver)
       if (files.length > 0 && talkBridge.hasReceiver()) {
         for (const f of files) talkBridge.shareFile(f).catch(() => {});
+      }
+      // Avisa no Talk quem foi @mencionado no comentário (melhor esforço).
+      if (issue) {
+        const mentioned = (members ?? []).filter(
+          (m) => m.id !== currentUser?.id && text.includes(`@${m.name}`),
+        );
+        for (const m of mentioned) {
+          void notifyOnTalk(
+            m.id,
+            `Você foi mencionado num comentário na tarefa #${issue.id} ${issue.subject}.`,
+          );
+        }
       }
     } catch (err: unknown) {
       // Redmine valida a tarefa inteira ao salvar uma nota: se há campo obrigatório
@@ -2053,12 +2229,15 @@ export function IssueModal({
     }
     if (current.journals.length) result.push(current);
     return result;
+    // Depende só de journals: o objeto `issue` inteiro muda a cada refetch e
+    // recalcularia o agrupamento à toa.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [issue?.journals, statuses]);
 
   return (
     <>
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop"
         onClick={requestClose}
       >
         <div
@@ -2078,7 +2257,7 @@ export function IssueModal({
                     </span>
                     <span className="text-xs text-slate-400">{issue?.project.name}</span>
                     <a
-                      href={`https://redmine.b2click.com/issues/${issue?.id}`}
+                      href={redmineIssueUrl(issue?.id, getStoredAuth()?.url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-blue-400 hover:text-blue-600 dark:hover:text-blue-400"
@@ -2173,6 +2352,17 @@ export function IssueModal({
                 >
                   <NotebookPen size={13} /> Nota
                 </button>
+              )}
+
+              {/* Impedimento: nova tarefa OU vincular uma já existente. Vínculo por
+                  comentário (⛔ ...) nas duas — a API de relations do Redmine 403 pra
+                  a key não-admin, ver useAddNote nos handlers em App.tsx. */}
+              {issue && (onCreateBlocker || onLinkBlocker) && (
+                <BlockerButton
+                  issue={{ id: issue.id, subject: issue.subject }}
+                  onCreateBlocker={onCreateBlocker}
+                  onLinkBlocker={onLinkBlocker}
+                />
               )}
 
               {/* Observar (lista local, independente da API do Redmine) */}
@@ -2459,7 +2649,7 @@ export function IssueModal({
                       currentRevisor={cfStr(CF.REVISOR)}
                       currentDate={cfStr(CF.PREVISAO_REVISAO)}
                       members={members ?? []}
-                      onConfirm={(revisorId, date) =>
+                      onConfirm={(revisorId, date, notifyTalk) => {
                         updateField({
                           status_id: 71,
                           assigned_to_id: revisorId ? parseInt(revisorId) : '',
@@ -2467,8 +2657,14 @@ export function IssueModal({
                             { id: CF.REVISOR, value: revisorId },
                             { id: CF.PREVISAO_REVISAO, value: date },
                           ],
-                        })
-                      }
+                        });
+                        if (revisorId && notifyTalk) {
+                          void notifyOnTalk(
+                            parseInt(revisorId),
+                            `Te enviei a tarefa #${issue.id} ${issue.subject} pra revisão.`,
+                          );
+                        }
+                      }}
                     />
                   </div>
                 )}
@@ -2491,20 +2687,32 @@ export function IssueModal({
                           members={members ?? []}
                           canApprove={canApprove}
                           canReject={canReject}
-                          onApprove={(note) =>
+                          onApprove={(note, notifyTalk) => {
                             updateField({
                               status_id: 35,
                               ...(integrador ? { assigned_to_id: integrador.id } : {}),
                               ...(note.trim() ? { notes: note.trim() } : {}),
-                            })
-                          }
-                          onReject={(assigneeId, note) =>
+                            });
+                            if (integrador && notifyTalk) {
+                              void notifyOnTalk(
+                                integrador.id,
+                                `Tarefa #${issue.id} ${issue.subject} foi aprovada na revisão e é sua pra integrar.${note.trim() ? ` Nota: ${note.trim()}` : ''}`,
+                              );
+                            }
+                          }}
+                          onReject={(assigneeId, note, notifyTalk) => {
                             updateField({
                               status_id: 34,
                               assigned_to_id: assigneeId ? parseInt(assigneeId) : '',
                               ...(note.trim() ? { notes: note.trim() } : {}),
-                            })
-                          }
+                            });
+                            if (assigneeId && notifyTalk) {
+                              void notifyOnTalk(
+                                parseInt(assigneeId),
+                                `Tarefa #${issue.id} ${issue.subject} foi reprovada na revisão e voltou pra você.${note.trim() ? ` Motivo: ${note.trim()}` : ''}`,
+                              );
+                            }
+                          }}
                         />
                       </div>
                     );
@@ -2671,6 +2879,8 @@ export function IssueModal({
                         statuses={statuses}
                         members={members}
                         issue={issue}
+                        onOpenTalk={onOpenTalk}
+                        openingTalkFor={openingTalkFor}
                       />
                     )}
 
@@ -2713,6 +2923,7 @@ export function IssueModal({
                                       size={28}
                                       className="mt-0.5 text-xs"
                                       onOpenTalk={onOpenTalk}
+                                      openingTalkFor={openingTalkFor}
                                     />
                                     <div className="flex-1 min-w-0">
                                       <div className="flex items-center gap-2 mb-1">
@@ -2829,6 +3040,7 @@ export function IssueModal({
                               size={28}
                               className="mt-0.5 text-xs"
                               onOpenTalk={onOpenTalk}
+                              openingTalkFor={openingTalkFor}
                             />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-1">
@@ -3046,7 +3258,7 @@ export function IssueModal({
       )}
       {confirmingClose && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40"
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 modal-backdrop"
           onClick={() => setConfirmingClose(false)}
         >
           <div

@@ -4,6 +4,7 @@
 // (K86) e persistência pra exibir in-app. Ver [[notifications-architecture]].
 const axios = require('axios');
 const { buildAuthHeaders } = require('../lib/redmine');
+const { getInternalCaAgent } = require('../lib/internalCa');
 const { fetchAllIssues } = require('../lib/pagination');
 const { REDMINE_CF, REDMINE_STATUS } = require('../lib/config');
 const { getAi } = require('./secretsStore');
@@ -21,6 +22,7 @@ async function gather(rec) {
       ...buildAuthHeaders(rec.key || '', rec.username || '', rec.password || ''),
       'Content-Type': 'application/json',
     },
+    ...(getInternalCaAgent() ? { httpsAgent: getInternalCaAgent() } : {}),
   });
   const me = (await client.get('/users/current.json')).data.user;
   const uid = me.id;

@@ -4,6 +4,7 @@ const express = require('express');
 const axios = require('axios');
 const router = express.Router();
 const doku = require('../dokuwiki');
+const { getInternalCaAgent } = require('../lib/internalCa');
 
 // Busca full-text no DokuWiki (scraping do HTML de resultados).
 router.get('/wiki/search', async (req, res) => {
@@ -14,6 +15,7 @@ router.get('/wiki/search', async (req, res) => {
   } catch (err) {
     if (err.code === 'WIKI_NO_CREDS')
       return res.status(401).json({ error: 'credentials_required' });
+    if (err.code === 'ECONNABORTED') return res.status(504).json({ error: 'timeout' });
     console.error('[wiki/search]', err.message);
     res.status(500).json({ error: err.message });
   }
@@ -58,6 +60,7 @@ router.get('/wiki/media', async (req, res) => {
       responseType: 'stream',
       timeout: 10000,
       maxRedirects: 0, // mídia é direta; não seguir redirect (anti-SSRF)
+      ...(getInternalCaAgent() ? { httpsAgent: getInternalCaAgent() } : {}),
     });
     const ct = response.headers['content-type'] || 'image/png';
     res.set('Content-Type', ct);

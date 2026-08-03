@@ -1,7 +1,19 @@
 import { useState } from 'react';
-import { Eye, EyeOff, Gem, Loader2, AlertCircle, ExternalLink, KeyRound, User } from 'lucide-react';
-import { saveAuth, RedmineAuth } from '../api/redmine';
+import {
+  Eye,
+  EyeOff,
+  Gem,
+  Loader2,
+  AlertCircle,
+  ExternalLink,
+  KeyRound,
+  User,
+  Lock,
+} from 'lucide-react';
+import { saveAuth, RedmineAuth, takeLogoutReason } from '../api/redmine';
 import axios from 'axios';
+import { errorStatus, errorDetail, errorMessage, isNetworkError } from '../utils/httpError';
+import { appDefaults, LOCKED_HINT } from '../utils/appDefaults';
 
 interface Props {
   onSuccess: () => void;
@@ -10,7 +22,10 @@ interface Props {
 type AuthMode = 'token' | 'userpass';
 
 export function Login({ onSuccess }: Props) {
-  const [url, setUrl] = useState('https://');
+  // Preenchido pelo build quando a organização definiu VITE_REDMINE_URL; nesse
+  // caso o campo fica travado (ninguém precisa — nem consegue — digitar errado).
+  const { value: defaultUrl, locked: urlLocked } = appDefaults.redmineUrl;
+  const [url, setUrl] = useState(defaultUrl || 'https://');
   const [mode, setMode] = useState<AuthMode>('token');
   const [apiKey, setApiKey] = useState('');
   const [username, setUsername] = useState('');
@@ -18,10 +33,13 @@ export function Login({ onSuccess }: Props) {
   const [showSecret, setShowSecret] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Lido uma única vez: explica por que a sessão caiu (ex.: senha de rede trocada).
+  const [expiredReason, setExpiredReason] = useState<string | null>(() => takeLogoutReason());
 
   const validate = async () => {
     setLoading(true);
     setError(null);
+    setExpiredReason(null); // já entendeu o aviso; a partir daqui vale o resultado da tentativa
 
     const cleanUrl = url.replace(/\/$/, '');
 
@@ -43,18 +61,18 @@ export function Login({ onSuccess }: Props) {
       saveAuth(safeAuth as RedmineAuth);
 
       onSuccess();
-    } catch (err: any) {
-      const status = err.response?.status;
+    } catch (err) {
+      const status = errorStatus(err);
       if (status === 401 || status === 403) {
         setError(
           mode === 'token'
             ? 'Chave de API inválida ou sem permissão. Verifique e tente novamente.'
             : 'Usuário ou senha inválidos. Verifique e tente novamente.',
         );
-      } else if (status === 404 || err.code === 'ERR_NETWORK') {
+      } else if (status === 404 || isNetworkError(err)) {
         setError('URL do Redmine não encontrada. Verifique o endereço e tente novamente.');
       } else {
-        setError(`Erro ao conectar: ${err.response?.data?.error || err.message}`);
+        setError(`Erro ao conectar: ${errorDetail(err) || errorMessage(err)}`);
       }
     } finally {
       setLoading(false);
@@ -89,15 +107,30 @@ export function Login({ onSuccess }: Props) {
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1.5">
               URL do Redmine
             </label>
-            <input
-              type="url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://redmine.suaempresa.com"
-              autoFocus
-              className="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500"
-              onKeyDown={(e) => e.key === 'Enter' && canSubmit && validate()}
-            />
+            <div className="relative">
+              <input
+                type="url"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://redmine.suaempresa.com"
+                readOnly={urlLocked}
+                title={urlLocked ? LOCKED_HINT : undefined}
+                autoFocus={!urlLocked}
+                className={`w-full text-sm border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 ${
+                  urlLocked
+                    ? 'bg-slate-50 dark:bg-slate-900/60 pr-9 cursor-default'
+                    : 'bg-white dark:bg-slate-800'
+                }`}
+                onKeyDown={(e) => e.key === 'Enter' && canSubmit && validate()}
+              />
+              {urlLocked && (
+                <Lock
+                  size={13}
+                  aria-hidden
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
+                />
+              )}
+            </div>
           </div>
 
           {/* Toggle de modo */}
@@ -209,6 +242,14 @@ export function Login({ onSuccess }: Props) {
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Sessão encerrada por credencial vencida */}
+          {expiredReason && !error && (
+            <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-sm text-amber-800 dark:text-amber-300">
+              <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />
+              <span>{expiredReason}</span>
             </div>
           )}
 

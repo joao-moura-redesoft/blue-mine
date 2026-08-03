@@ -3,6 +3,7 @@
 // quando a sala esvazia. Não depende de API admin do servidor Jitsi: os próprios
 // clientes reportam presença via heartbeat/leave.
 const axios = require('axios');
+const { getInternalCaAgent } = require('../lib/internalCa');
 
 // roomName -> {
 //   issueId, startedAt, names:Set, auth,
@@ -87,7 +88,11 @@ function postNote(auth, issueId, notes) {
   else
     headers['Authorization'] =
       'Basic ' + Buffer.from(`${auth.user}:${auth.pass}`).toString('base64');
-  return axios.put(`${auth.url}/issues/${issueId}.json`, { issue: { notes } }, { headers });
+  return axios.put(
+    `${auth.url}/issues/${issueId}.json`,
+    { issue: { notes } },
+    { headers, ...(getInternalCaAgent() ? { httpsAgent: getInternalCaAgent() } : {}) },
+  );
 }
 
 // Varre salas: descarta participantes sem heartbeat e finaliza salas vazias.

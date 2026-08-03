@@ -29,7 +29,10 @@ export async function refreshWorkflowNotifications(qc: QueryClient) {
     await new Promise<void>((resolve) => {
       const unsubscribe = qc.getQueryCache().subscribe((event) => {
         const k = event.query.queryKey;
-        if (k.length === NOTIF_KEY.length && k.every((v: unknown, i: number) => v === NOTIF_KEY[i])) {
+        if (
+          k.length === NOTIF_KEY.length &&
+          k.every((v: unknown, i: number) => v === NOTIF_KEY[i])
+        ) {
           if (event.query.state.fetchStatus !== 'fetching') {
             unsubscribe();
             resolve();

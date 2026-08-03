@@ -3,6 +3,7 @@ import { X, FileText, CheckCircle, Copy, Check, AlertCircle, Loader2 } from 'luc
 import { redmineApi } from '../../api/redmine';
 import { Markdown } from '../Markdown';
 import type { ActiveCall, PoppedOutCall } from './JitsiContext';
+import { errorDetail, errorMessage } from '../../utils/httpError';
 
 interface Props {
   isOpen: boolean;
@@ -47,10 +48,10 @@ export function MeetingSummaryModal({ isOpen, onClose, audioBlob, call }: Props)
         setTranscript(res.transcript);
         setSummary(res.summary);
         setStep('done');
-      } catch (err: any) {
+      } catch (err) {
         if (isCancelled) return;
         setStep('error');
-        let msg = err.response?.data?.error || err.message || 'Erro ao transcrever áudio.';
+        let msg = errorDetail(err) || errorMessage(err) || 'Erro ao transcrever áudio.';
         if (msg === 'AI_NOT_CONFIGURED') {
           msg =
             'Nenhum provedor de IA configurado. Vá em Configurações (⚙️) -> IA e defina uma chave de API.';
@@ -88,8 +89,8 @@ export function MeetingSummaryModal({ isOpen, onClose, audioBlob, call }: Props)
       const noteContent = `${summary}\n\n---\n**Resumo gerado por IA com base na gravação da chamada.**`;
       await redmineApi.addNote(targetIssueId, noteContent);
       setPosted(true);
-    } catch (err: any) {
-      alert('Erro ao postar nota: ' + err.message);
+    } catch (err) {
+      alert('Erro ao postar nota: ' + errorMessage(err));
     } finally {
       setIsPosting(false);
     }
@@ -102,7 +103,7 @@ export function MeetingSummaryModal({ isOpen, onClose, audioBlob, call }: Props)
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center modal-backdrop p-4">
       <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex-shrink-0">

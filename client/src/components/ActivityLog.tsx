@@ -4,6 +4,7 @@ import { ArrowRight, Paperclip } from 'lucide-react';
 import type { Journal, JournalDetail, IssueStatus, Issue, Attachment } from '../types/redmine';
 import { Markdown, inlineImageNames } from './Markdown';
 import { attachmentUrl } from '../api/redmine';
+import { PersonAvatar } from './PersonAvatar';
 
 // Anexos adicionados num journal: imagens como miniatura (clicável → lightbox do
 // modal), demais como link de download. Mostra mesmo sem referência inline na nota.
@@ -136,11 +137,15 @@ export function ActivityLog({
   statuses,
   members,
   issue,
+  onOpenTalk,
+  openingTalkFor,
 }: {
   journals?: Journal[];
   statuses?: IssueStatus[];
   members?: { id: number; name: string }[];
   issue: Issue;
+  onOpenTalk?: (ncUid: string) => void;
+  openingTalkFor?: string | null;
 }) {
   const entries = (journals ?? []).filter((j) => (j.details?.length ?? 0) > 0 || j.notes?.trim());
   const ctx: LookupCtx = { statuses, members, issue };
@@ -159,9 +164,14 @@ export function ActivityLog({
         const details = j.details ?? [];
         return (
           <div key={j.id} className="flex gap-3">
-            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-slate-400 to-slate-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-0.5">
-              {j.user.name.charAt(0).toUpperCase()}
-            </div>
+            <PersonAvatar
+              redmineUserId={j.user.id}
+              name={j.user.name}
+              size={28}
+              className="mt-0.5 text-xs"
+              onOpenTalk={onOpenTalk}
+              openingTalkFor={openingTalkFor}
+            />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">

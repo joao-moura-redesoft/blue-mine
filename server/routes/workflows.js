@@ -68,7 +68,9 @@ router.get(
     // usuário (ex.: "Testar") — sem isso um GET repetido na mesma URL pode ser
     // servido do cache HTTP do navegador em vez de bater no servidor.
     res.set('Cache-Control', 'no-store');
-    res.json(events.map((e) => ({ ...e, workflowName: nameById.get(e.workflowId) || 'Automação' })));
+    res.json(
+      events.map((e) => ({ ...e, workflowName: nameById.get(e.workflowId) || 'Automação' })),
+    );
   }),
 );
 

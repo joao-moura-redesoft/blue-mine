@@ -12,8 +12,13 @@ const axios = require('axios');
 const { createSession, MAIL_TTL_MS } = require('./lib/sessions');
 const { getMyUserId } = require('./lib/redmine');
 const { getAd } = require('./services/secretsStore');
+const { getInternalCaAgent } = require('./lib/internalCa');
+const AppError = require('./lib/AppError');
+const { assertNotKnownBad, recordFailure, recordSuccess } = require('./lib/credentialGuard');
 
-const DEFAULT_HOST = process.env.ZIMBRA_HOST || 'email.redesoft.org';
+// Mesmo endereço que o frontend embute no build (VITE_ZIMBRA_HOST, no .env da
+// raiz). ZIMBRA_HOST continua aceito para não quebrar instalações antigas.
+const DEFAULT_HOST = process.env.VITE_ZIMBRA_HOST || process.env.ZIMBRA_HOST || '';
 
 // Cache de token por "host:user" — o token do Zimbra vale ~24h.
 // Guardamos com uma margem de segurança para reautenticar antes de expirar.
@@ -45,6 +50,7 @@ async function zimbraSoap(host, token, namespace, requestName, payload) {
     ({ data } = await axios.post(soapUrl(host), body, {
       headers: { 'Content-Type': 'application/json' },
       timeout: 20000,
+      ...(getInternalCaAgent() ? { httpsAgent: getInternalCaAgent() } : {}),
     }));
   } catch (e) {
     // O Zimbra devolve o Fault com HTTP 500 — o axios rejeita antes de chegarmos
@@ -64,6 +70,11 @@ async function authenticate(host, user, password) {
   const cached = tokenCache.get(key);
   if (cached && cached.exp > Date.now() + 60_000) return cached.token;
 
+  // Esta senha já foi recusada pelo Zimbra? Então nem tenta: cada tentativa aqui
+  // é um login falho no AD, e o polling de e-mail bateria de novo em 2 minutos.
+  // Ver credentialGuard.js.
+  assertNotKnownBad('zimbra', user, password);
+
   let resp;
   try {
     resp = await zimbraSoap(host, null, 'urn:zimbraAccount', 'AuthRequest', {
@@ -73,15 +84,19 @@ async function authenticate(host, user, password) {
   } catch (err) {
     // Credenciais inválidas / conta inexistente -> 401 para o front tratar.
     if (/AUTH_FAILED|NO_SUCH_ACCOUNT|PASSWORD/i.test(err.zimbraCode || err.message)) {
+      recordFailure('zimbra', user, password);
       err.statusCode = 401;
-      err.message = 'Usuário ou senha do e-mail inválidos no Zimbra.';
+      err.message =
+        'Usuário ou senha do e-mail inválidos no Zimbra — se você trocou a senha de rede, saia e entre novamente.';
       err.isSafe = true; // mensagem intencional: o errorMiddleware deve preservá-la
+      err.credentialsStale = true;
     }
     throw err;
   }
   const token = resp.authToken?.[0]?._content || resp.authToken?._content || resp.authToken;
   const lifetime = Number(resp.lifetime) || 24 * 60 * 60 * 1000;
   if (!token) throw new Error('Zimbra não retornou token de autenticação');
+  recordSuccess('zimbra', user); // senha voltou a valer: libera tentativas futuras
   tokenCache.set(key, { token, exp: Date.now() + lifetime });
   return token;
 }
@@ -92,6 +107,14 @@ async function authenticate(host, user, password) {
 // Headers x-mail-* sempre têm prioridade quando presentes.
 async function resolveMailCreds(req) {
   const host = req.headers['x-mail-host'] || DEFAULT_HOST;
+  // Sem host não dá para montar a URL: falha explícita em vez de bater num
+  // endereço malformado ("https:///...") e devolver erro de rede sem sentido.
+  if (!host) {
+    throw new AppError(
+      503,
+      'Servidor de e-mail não configurado. Defina VITE_ZIMBRA_HOST no .env antes de gerar o build.',
+    );
+  }
   let user = req.headers['x-redmine-user'] || '';
   let password = req.headers['x-redmine-pass'] || '';
   if (!user || !password) {
@@ -338,6 +361,10 @@ function addrList(v) {
 //   - `attachments`: aids vindos de /service/upload (upload prévio).
 //   - `forwardParts`: partes de outra mensagem reanexadas por (mid, part),
 //     sem re-upload (usado no Encaminhar).
+//   - `inlineAttachments`: imagens embutidas no corpo (assinatura/rodapé). Cada
+//     uma vira uma parte irmã do HTML dentro de multipart/related, carimbada com
+//     o Content-ID que o HTML referencia via src="cid:…". É o que faz a imagem
+//     aparecer sem o destinatário liberar "exibir imagens externas".
 function buildMessagePart({
   to,
   cc,
@@ -348,19 +375,36 @@ function buildMessagePart({
   inReplyTo,
   attachments,
   forwardParts,
+  inlineAttachments,
 }) {
   const e = [];
   for (const addr of addrList(to)) e.push({ t: 't', a: addr });
   for (const addr of addrList(cc)) e.push({ t: 'c', a: addr });
   for (const addr of addrList(bcc)) e.push({ t: 'b', a: addr });
 
+  const inline = (inlineAttachments || []).filter((a) => a && a.aid && a.cid);
+
+  const htmlPart = { ct: 'text/html', content: { _content: html } };
+  // multipart/related agrupa o HTML com as imagens que ele referencia; sem
+  // imagens inline mandamos o text/html direto, como antes.
+  const richPart = inline.length
+    ? {
+        ct: 'multipart/related',
+        mp: [
+          htmlPart,
+          ...inline.map((a) => ({
+            ct: a.contentType || 'application/octet-stream',
+            ci: `<${String(a.cid).replace(/[<>]/g, '')}>`,
+            attach: { aid: a.aid },
+          })),
+        ],
+      }
+    : htmlPart;
+
   const body = html
     ? {
         ct: 'multipart/alternative',
-        mp: [
-          { ct: 'text/plain', content: { _content: text || '' } },
-          { ct: 'text/html', content: { _content: html } },
-        ],
+        mp: [{ ct: 'text/plain', content: { _content: text || '' } }, richPart],
       }
     : { ct: 'text/plain', content: { _content: text || '' } };
 
@@ -411,6 +455,7 @@ async function uploadAttachment(req, { filename, contentType, buffer }) {
         'Content-Type': contentType || 'application/octet-stream',
         'Content-Disposition': `attachment; filename="${safeName}"`,
       },
+      ...(getInternalCaAgent() ? { httpsAgent: getInternalCaAgent() } : {}),
     });
 
   let token = await authenticate(host, user, password);
@@ -580,6 +625,11 @@ async function createAppointment(
   if (start == null || end == null) throw badRequest('Início e fim são obrigatórios.');
   if (Number(end) <= Number(start)) throw badRequest('O fim deve ser depois do início.');
 
+  // <or> (organizador): o login costuma ser "pelado" (joao.moura), mas o Zimbra
+  // quer um endereço de verdade no organizador do convite.
+  const { user: loginUser } = await resolveMailCreds(req);
+  const myEmail = loginUser.includes('@') ? loginUser : `${loginUser}@redesoft.org`;
+
   const at = (attendees || [])
     .filter((a) => a && a.address)
     .map((a) => ({
@@ -605,13 +655,19 @@ async function createAppointment(
     allDay: allDay ? '1' : '0',
     s,
     e: eTime,
+    // Organizador explícito: sem isso o Zimbra não confirma que VOCÊ é o dono do
+    // item quando há convidados — rejeita com "MUST_BE_ORGANIZER" mesmo sendo uma
+    // criação nova (sem <at> ele aceita de boa; só quebra com convidados).
+    or: { a: myEmail, d: myEmail },
   };
   // Só inclui <at> quando há convidados (evita elemento vazio no invite).
   if (at.length) comp.at = at;
 
   const m = {
     su: { _content: String(subject) },
-    inv: { comp },
+    // method REQUEST: formaliza que isso é um pedido de reunião do organizador,
+    // não uma publicação anônima — o Zimbra exige isso pra aceitar convidados.
+    inv: { method: at.length ? 'REQUEST' : 'PUBLISH', comp },
     mp: [{ ct: 'text/plain', content: { _content: String(description || '') } }],
   };
   // <e> = destinatários do e-mail de convite; omitido em compromisso pessoal.
@@ -702,6 +758,7 @@ async function fetchAttachment({ host, user, password }, msgId, part) {
       responseType: 'arraybuffer',
       timeout: 30000,
       headers: { Cookie: `ZM_AUTH_TOKEN=${tok}` },
+      ...(getInternalCaAgent() ? { httpsAgent: getInternalCaAgent() } : {}),
     });
   let token = await authenticate(host, user, password);
   let resp;
@@ -722,6 +779,7 @@ async function fetchAttachment({ host, user, password }, msgId, part) {
 
 module.exports = {
   DEFAULT_HOST,
+  buildMessagePart, // exportado para teste da montagem MIME
   resolveMailCreds,
   authenticate,
   tokenFor,

@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { formatDistanceToNow } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 import { ConfirmDialog } from './workflow/ConfirmDialog';
 import {
   X,
@@ -13,11 +15,11 @@ import {
   MessageSquare,
   LogIn,
   Mail,
-  BookOpen,
   Shield,
-  Plus,
-  Pencil,
+  RefreshCw,
+  Lock,
 } from 'lucide-react';
+import { useTalkRedmineMatch, useRefreshTalkRedmineMatch } from '../hooks/useTalk';
 import {
   getConfiguredProviders,
   saveAIKey,
@@ -25,36 +27,16 @@ import {
   getActiveAIProvider,
   type AIProvider,
 } from '../utils/aiConfig';
-import {
-  getTalkAuth,
-  saveTalkAuth,
-  clearTalkAuth,
-  initLoginFlow,
-  pollLoginFlow,
-} from '../api/talk';
+import { getTalkAuth, saveTalkAuth, clearTalkAuth } from '../api/talk';
 import { getTalkPrefs, saveTalkPrefs, type TalkPrefs } from '../utils/talkPrefs';
-import {
-  getMailConfig,
-  saveMailConfig,
-  clearMailConfig,
-  DEFAULT_HOST,
-  getMailHost,
-  getSignature,
-  saveSignature,
-  getTemplates,
-  saveTemplates,
-  type MailTemplate,
-} from '../utils/mailConfig';
+import { useTalkLoginFlow } from '../hooks/useTalkLoginFlow';
+import { TalkReconnectModal } from './TalkReconnectModal';
+import { getMailConfig, saveMailConfig, DEFAULT_HOST } from '../utils/mailConfig';
 import { getStoredAuth, redmineApi, type AIUsage } from '../api/redmine';
 import { mailApi } from '../api/mail';
-import { MailComposeEditor } from './MailComposeEditor';
-import {
-  adConfigured,
-  saveADCreds,
-  clearADCreds,
-  hasEffectiveCreds,
-  needsADCreds,
-} from '../utils/adConfig';
+import { adConfigured, saveADCreds, clearADCreds, hasEffectiveCreds } from '../utils/adConfig';
+import { errorDetail } from '../utils/httpError';
+import { appDefaults, LOCKED_HINT, dokuwikiHost } from '../utils/appDefaults';
 
 interface Props {
   onClose: () => void;
@@ -336,8 +318,10 @@ type FlowState = 'idle' | 'waiting' | 'error';
 function NextcloudSection() {
   const [currentAuth, setCurrentAuth] = useState(() => getTalkAuth());
   const [open, setOpen] = useState(!!currentAuth);
-  const [url, setUrl] = useState('');
-  const [flowState, setFlowState] = useState<FlowState>('idle');
+  // Endereço do Nextcloud definido no build (VITE_NEXTCLOUD_URL): vale para os
+  // dois modos de entrada (fluxo de login e usuário+token).
+  const { value: defaultNcUrl, locked: ncLocked } = appDefaults.nextcloudUrl;
+  const [url, setUrl] = useState(defaultNcUrl);
   const [error, setError] = useState('');
   const [mode, setMode] = useState<'flow' | 'manual'>('flow');
   const [mUser, setMUser] = useState('');
@@ -345,64 +329,29 @@ function NextcloudSection() {
   const [showToken, setShowToken] = useState(false);
   const [saving, setSaving] = useState(false);
   const [prefs, setPrefs] = useState<TalkPrefs>(() => getTalkPrefs());
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const updatePref = (patch: Partial<TalkPrefs>) => {
     const next = { ...prefs, ...patch };
     setPrefs(next);
     saveTalkPrefs(next); // dispara TALK_PREFS_EVENT → usePushNotifications re-inscreve
   };
-  const pollParamsRef = useRef<{ pollEndpoint: string; pollToken: string } | null>(null);
 
-  const stopPolling = () => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-    pollParamsRef.current = null;
-  };
+  // Login Flow compartilhado com o diálogo de reconexão: tem timeout e mostra o
+  // erro do poll, em vez de girar de 2 em 2s para sempre em silêncio.
+  const flow = useTalkLoginFlow((auth) => {
+    setCurrentAuth(auth);
+    setUrl('');
+  });
+  const flowState: FlowState =
+    flow.phase === 'waiting' || flow.phase === 'starting'
+      ? 'waiting'
+      : flow.phase === 'error'
+        ? 'error'
+        : 'idle';
+  const flowError = flow.error;
 
-  useEffect(() => () => stopPolling(), []);
-
-  const startFlow = async () => {
-    const base = url.trim().replace(/\/$/, '');
-    if (!base) return;
-    setError('');
-    setFlowState('waiting');
-    try {
-      const { loginUrl, pollEndpoint, pollToken } = await initLoginFlow(base);
-      window.open(loginUrl, '_blank', 'noopener');
-      pollParamsRef.current = { pollEndpoint, pollToken };
-      pollRef.current = setInterval(async () => {
-        if (!pollParamsRef.current) return;
-        try {
-          const result = await pollLoginFlow(
-            pollParamsRef.current.pollEndpoint,
-            pollParamsRef.current.pollToken,
-          );
-          if (result.done) {
-            stopPolling();
-            const auth = { url: result.server.replace(/\/$/, ''), user: result.user };
-            saveTalkAuth(auth);
-            setCurrentAuth(auth);
-            setUrl('');
-            setFlowState('idle');
-          }
-        } catch {
-          // poll pode falhar por rede; ignora e tenta no próximo tick
-        }
-      }, 2000);
-    } catch {
-      setFlowState('error');
-      setError('Não foi possível conectar ao Nextcloud. Verifique a URL.');
-    }
-  };
-
-  const cancelFlow = () => {
-    stopPolling();
-    setFlowState('idle');
-    setError('');
-  };
+  const startFlow = () => flow.start(url);
+  const cancelFlow = () => flow.cancel();
 
   // Autenticação manual por token (senha de app do Nextcloud). Útil quando o Login Flow
   // não funciona (proxy reverso, etc.) ou quando já se tem uma senha de app gerada.
@@ -438,6 +387,7 @@ function NextcloudSection() {
   };
 
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [showReconnect, setShowReconnect] = useState(false);
   const remove = () => {
     clearTalkAuth();
     setCurrentAuth(null);
@@ -476,12 +426,24 @@ function NextcloudSection() {
                     {currentAuth.user}@{currentAuth.url.replace(/^https?:\/\//, '')}
                   </span>
                 </div>
-                <button
-                  onClick={() => setConfirmRemove(true)}
-                  className="flex items-center gap-1 text-xs text-red-400 hover:text-red-600 transition-colors"
-                >
-                  <Trash2 size={11} /> Remover
-                </button>
+                <div className="flex items-center gap-3">
+                  {/* Sem isto, um token revogado virava beco sem saída: a seção
+                      dizia "Configurado" e a única ação era Remover — que apaga o
+                      vínculo (inclusive no servidor) antes de haver um novo. */}
+                  <button
+                    onClick={() => setShowReconnect(true)}
+                    title="Autorizar novamente no Nextcloud (mantém o vínculo atual até dar certo)"
+                    className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 transition-colors"
+                  >
+                    <RefreshCw size={11} /> Reconectar
+                  </button>
+                  <button
+                    onClick={() => setConfirmRemove(true)}
+                    className="flex items-center gap-1 text-xs text-red-400 hover:text-red-600 transition-colors"
+                  >
+                    <Trash2 size={11} /> Remover
+                  </button>
+                </div>
                 {confirmRemove && (
                   <ConfirmDialog
                     title="Desvincular Nextcloud Talk?"
@@ -490,6 +452,14 @@ function NextcloudSection() {
                     danger
                     onConfirm={remove}
                     onClose={() => setConfirmRemove(false)}
+                  />
+                )}
+                {showReconnect && (
+                  <TalkReconnectModal
+                    onClose={() => {
+                      setShowReconnect(false);
+                      setCurrentAuth(getTalkAuth());
+                    }}
                   />
                 )}
               </div>
@@ -526,6 +496,13 @@ function NextcloudSection() {
                     className="mt-0.5 h-4 w-4 accent-blue-600 flex-shrink-0"
                   />
                 </label>
+              </div>
+
+              <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                  Vínculo com o Redmine
+                </p>
+                <RedmineMatchRefresh />
               </div>
             </>
           ) : flowState === 'waiting' ? (
@@ -569,17 +546,32 @@ function NextcloudSection() {
               {mode === 'flow' ? (
                 <>
                   <div className="flex gap-2">
-                    <input
-                      type="url"
-                      value={url}
-                      onChange={(e) => {
-                        setUrl(e.target.value);
-                        setError('');
-                      }}
-                      onKeyDown={(e) => e.key === 'Enter' && startFlow()}
-                      placeholder="https://drive.suaempresa.com"
-                      className="flex-1 text-xs border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                    />
+                    <div className="relative flex-1">
+                      <input
+                        type="url"
+                        value={url}
+                        onChange={(e) => {
+                          setUrl(e.target.value);
+                          setError('');
+                        }}
+                        onKeyDown={(e) => e.key === 'Enter' && startFlow()}
+                        placeholder="https://drive.suaempresa.com"
+                        readOnly={ncLocked}
+                        title={ncLocked ? LOCKED_HINT : undefined}
+                        className={`w-full text-xs border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400 ${
+                          ncLocked
+                            ? 'bg-slate-50 dark:bg-slate-900/60 pr-8 cursor-default'
+                            : 'bg-white dark:bg-slate-800'
+                        }`}
+                      />
+                      {ncLocked && (
+                        <Lock
+                          size={11}
+                          aria-hidden
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
+                        />
+                      )}
+                    </div>
                     <button
                       onClick={startFlow}
                       disabled={!url.trim()}
@@ -594,16 +586,31 @@ function NextcloudSection() {
                 </>
               ) : (
                 <>
-                  <input
-                    type="url"
-                    value={url}
-                    onChange={(e) => {
-                      setUrl(e.target.value);
-                      setError('');
-                    }}
-                    placeholder="https://drive.suaempresa.com"
-                    className="w-full text-xs border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                  />
+                  <div className="relative">
+                    <input
+                      type="url"
+                      value={url}
+                      onChange={(e) => {
+                        setUrl(e.target.value);
+                        setError('');
+                      }}
+                      placeholder="https://drive.suaempresa.com"
+                      readOnly={ncLocked}
+                      title={ncLocked ? LOCKED_HINT : undefined}
+                      className={`w-full text-xs border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400 ${
+                        ncLocked
+                          ? 'bg-slate-50 dark:bg-slate-900/60 pr-8 cursor-default'
+                          : 'bg-white dark:bg-slate-800'
+                      }`}
+                    />
+                    {ncLocked && (
+                      <Lock
+                        size={11}
+                        aria-hidden
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
+                      />
+                    )}
+                  </div>
                   <input
                     type="text"
                     value={mUser}
@@ -657,11 +664,45 @@ function NextcloudSection() {
                   </p>
                 </>
               )}
-              {error && <p className="text-xs text-red-500 dark:text-red-400">{error}</p>}
+              {(error || flowError) && (
+                <p className="text-xs text-red-500 dark:text-red-400">{error || flowError}</p>
+              )}
             </>
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Mostra quando o vínculo Redmine↔Talk (por nome) foi montado e deixa forçar uma
+// reconstrução agora — sem esperar o cache de 24h do servidor nem recarregar a página
+// (o refresh já atualiza o cache do React Query direto, então o efeito é imediato em
+// qualquer lugar do app que use o vínculo: PeopleView, avatares, o botão de conversa etc).
+function RedmineMatchRefresh() {
+  const { data, isLoading } = useTalkRedmineMatch();
+  const refresh = useRefreshTalkRedmineMatch();
+
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        {isLoading
+          ? 'Carregando…'
+          : data?.updatedAt
+            ? `Atualizado ${formatDistanceToNow(data.updatedAt, { addSuffix: true, locale: ptBR })}`
+            : 'Ainda não carregado'}
+        <span className="block text-[11px] text-slate-400 dark:text-slate-500">
+          Cruza nomes do Redmine com contas do Talk pra mostrar foto e permitir mensagem direta.
+        </span>
+      </p>
+      <button
+        onClick={() => refresh.mutate()}
+        disabled={refresh.isPending}
+        className="flex items-center gap-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 disabled:opacity-50 flex-shrink-0"
+      >
+        <RefreshCw size={12} className={refresh.isPending ? 'animate-spin' : ''} />
+        Atualizar agora
+      </button>
     </div>
   );
 }
@@ -836,7 +877,12 @@ function ADCredsSection() {
 // Seção E-mail — mostra status e permite customizar host se necessário.
 function MailSection() {
   const available = hasEffectiveCreds();
-  const [host, setHost] = useState(() => getMailConfig().host || DEFAULT_HOST);
+  // Com VITE_ZIMBRA_HOST definido no build, o host é fixo e o campo trava —
+  // o valor salvo antes não pode sobrepor a configuração da organização.
+  const { value: defaultZimbra, locked: zimbraLocked } = appDefaults.zimbraHost;
+  const [host, setHost] = useState(() =>
+    zimbraLocked ? defaultZimbra : getMailConfig().host || DEFAULT_HOST,
+  );
   const [saved, setSaved] = useState(false);
   const [testState, setTestState] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle');
   const [testError, setTestError] = useState('');
@@ -854,9 +900,9 @@ function MailSection() {
     try {
       await mailApi.ping();
       setTestState('ok');
-    } catch (e: any) {
+    } catch (e) {
       setTestState('error');
-      setTestError(e?.response?.data?.error || 'Falha na conexão');
+      setTestError(errorDetail(e) || 'Falha na conexão');
     }
   };
 
@@ -888,16 +934,31 @@ function MailSection() {
             Servidor Zimbra. Deixe o padrão se não souber qual usar.
           </p>
           <div className="flex gap-2">
-            <input
-              value={host}
-              onChange={(e) => {
-                setHost(e.target.value);
-                setSaved(false);
-              }}
-              onKeyDown={(e) => e.key === 'Enter' && saveHost()}
-              placeholder={DEFAULT_HOST}
-              className="flex-1 text-xs px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
-            />
+            <div className="relative flex-1">
+              <input
+                value={host}
+                onChange={(e) => {
+                  setHost(e.target.value);
+                  setSaved(false);
+                }}
+                onKeyDown={(e) => e.key === 'Enter' && saveHost()}
+                placeholder={DEFAULT_HOST}
+                readOnly={zimbraLocked}
+                title={zimbraLocked ? LOCKED_HINT : undefined}
+                className={`w-full text-xs px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400 ${
+                  zimbraLocked
+                    ? 'bg-slate-50 dark:bg-slate-900/60 pr-8 cursor-default'
+                    : 'bg-white dark:bg-slate-800'
+                }`}
+              />
+              {zimbraLocked && (
+                <Lock
+                  size={11}
+                  aria-hidden
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
+                />
+              )}
+            </div>
             <button
               onClick={saveHost}
               className="flex items-center gap-1 px-3 py-2 text-xs bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg font-medium transition-colors"
@@ -926,164 +987,12 @@ function MailSection() {
             </div>
           )}
 
-          <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-            <MailPersonalization />
-          </div>
+          <p className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-400 dark:text-slate-500">
+            Assinatura, rodapé de imagem e modelos ficam na engrenagem da aba{' '}
+            <strong className="font-medium text-slate-500 dark:text-slate-400">E-mail</strong>.
+          </p>
         </div>
       )}
-    </div>
-  );
-}
-
-// Assinatura (rodapé) e modelos de e-mail — configuração local por-usuário
-// (localStorage, como o host). O corpo usa o mesmo editor rico do compositor.
-function MailPersonalization() {
-  const [signature, setSignature] = useState(() => getSignature());
-  const [sigReset, setSigReset] = useState(0);
-  const [sigSaved, setSigSaved] = useState(false);
-  const [templates, setTemplates] = useState<MailTemplate[]>(() => getTemplates());
-  const [editing, setEditing] = useState<MailTemplate | null>(null);
-
-  const persistSignature = () => {
-    saveSignature(signature);
-    setSigSaved(true);
-    setTimeout(() => setSigSaved(false), 2000);
-  };
-
-  const persistTemplates = (list: MailTemplate[]) => {
-    setTemplates(list);
-    saveTemplates(list);
-  };
-
-  const newTemplate = () =>
-    setEditing({ id: `t_${Date.now()}`, name: '', subject: '', bodyHtml: '' });
-
-  const saveTemplate = () => {
-    if (!editing) return;
-    const name = editing.name.trim() || 'Sem nome';
-    const t = { ...editing, name };
-    const exists = templates.some((x) => x.id === t.id);
-    persistTemplates(exists ? templates.map((x) => (x.id === t.id ? t : x)) : [...templates, t]);
-    setEditing(null);
-  };
-
-  const removeTemplate = (id: string) => persistTemplates(templates.filter((x) => x.id !== id));
-
-  return (
-    <div className="space-y-4">
-      {/* Assinatura */}
-      <div className="space-y-2">
-        <p className="text-xs font-medium text-slate-600 dark:text-slate-300">Assinatura</p>
-        <p className="text-[11px] text-slate-400 dark:text-slate-500">
-          Aplicada automaticamente ao escrever uma nova mensagem.
-        </p>
-        <MailComposeEditor
-          value={signature}
-          onChange={setSignature}
-          resetSignal={sigReset}
-          minHeight={120}
-          placeholder="Sua assinatura (nome, cargo, contato, logo…)"
-        />
-        <div className="flex items-center gap-2">
-          <button
-            onClick={persistSignature}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg font-medium transition-colors"
-          >
-            {sigSaved ? <Check size={11} /> : null} Salvar assinatura
-          </button>
-          {signature && (
-            <button
-              onClick={() => {
-                setSignature('');
-                setSigReset((n) => n + 1);
-                saveSignature('');
-              }}
-              className="text-xs text-slate-400 hover:text-red-500"
-            >
-              Limpar
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Modelos */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-medium text-slate-600 dark:text-slate-300">Modelos</p>
-          <button
-            onClick={newTemplate}
-            className="flex items-center gap-1 px-2 py-1 text-xs text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
-          >
-            <Plus size={12} /> Novo modelo
-          </button>
-        </div>
-        {templates.length === 0 && !editing && (
-          <p className="text-[11px] text-slate-400 dark:text-slate-500">
-            Nenhum modelo. Crie modelos reutilizáveis para o compositor.
-          </p>
-        )}
-        {templates.map((t) => (
-          <div
-            key={t.id}
-            className="flex items-center justify-between px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-          >
-            <span className="text-xs text-slate-700 dark:text-slate-200 truncate">{t.name}</span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setEditing(t)}
-                className="p-1 text-slate-400 hover:text-blue-500"
-                title="Editar"
-              >
-                <Pencil size={12} />
-              </button>
-              <button
-                onClick={() => removeTemplate(t.id)}
-                className="p-1 text-slate-400 hover:text-red-500"
-                title="Remover"
-              >
-                <Trash2 size={12} />
-              </button>
-            </div>
-          </div>
-        ))}
-
-        {editing && (
-          <div className="space-y-2 p-3 rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50/40 dark:bg-blue-900/10">
-            <input
-              value={editing.name}
-              onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-              placeholder="Nome do modelo"
-              className="w-full text-xs px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
-            />
-            <input
-              value={editing.subject || ''}
-              onChange={(e) => setEditing({ ...editing, subject: e.target.value })}
-              placeholder="Assunto (opcional)"
-              className="w-full text-xs px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
-            />
-            <MailComposeEditor
-              value={editing.bodyHtml}
-              onChange={(html) => setEditing((cur) => (cur ? { ...cur, bodyHtml: html } : cur))}
-              minHeight={120}
-              placeholder="Corpo do modelo…"
-            />
-            <div className="flex items-center gap-2">
-              <button
-                onClick={saveTemplate}
-                className="flex items-center gap-1 px-3 py-1.5 text-xs bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 text-white rounded-lg font-medium transition-all duration-200"
-              >
-                <Check size={11} /> Salvar modelo
-              </button>
-              <button
-                onClick={() => setEditing(null)}
-                className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
     </div>
   );
 }
@@ -1120,7 +1029,7 @@ function WikiSection() {
           {available ? (
             <div className="flex items-center gap-2 text-xs text-green-700 dark:text-green-300 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg px-3 py-2.5">
               <Check size={13} />
-              <span>wiki.redesoft.com.br acessível com as credenciais configuradas.</span>
+              <span>{dokuwikiHost} acessível com as credenciais configuradas.</span>
             </div>
           ) : (
             <p className="text-xs text-slate-400 dark:text-slate-500">
@@ -1148,7 +1057,7 @@ export function SettingsModal({ onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop"
       onClick={onClose}
     >
       <div

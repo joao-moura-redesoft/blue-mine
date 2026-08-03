@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { Loader2 } from 'lucide-react';
 import { useTalkMatchFor } from '../hooks/useTalk';
 import { getTalkAuth } from '../api/talk';
 
@@ -9,15 +10,25 @@ interface Props {
   className?: string;
   /** Se informado e houver vínculo com o Talk, o avatar vira clicável e abre a conversa 1:1 */
   onOpenTalk?: (ncUid: string) => void;
+  /** ncUid da conversa sendo aberta agora, ou null — mostra um spinner sobre o avatar */
+  openingTalkFor?: string | null;
 }
 
 // Avatar de uma pessoa do Redmine: mostra a foto real do Nextcloud Talk quando há
 // vínculo por nome (server/services/talkMatch.js); cai pras iniciais quando não há
 // vínculo, sem foto, ou o Talk não está configurado nesta sessão.
-export function PersonAvatar({ redmineUserId, name, size = 28, className = '', onOpenTalk }: Props) {
+export function PersonAvatar({
+  redmineUserId,
+  name,
+  size = 28,
+  className = '',
+  onOpenTalk,
+  openingTalkFor,
+}: Props) {
   const match = useTalkMatchFor(redmineUserId);
   const ncUid = match?.ncUid;
   const auth = getTalkAuth();
+  const pending = !!openingTalkFor && openingTalkFor === ncUid;
 
   const { data: src } = useQuery({
     queryKey: ['talk-avatar', ncUid, size],
@@ -56,7 +67,13 @@ export function PersonAvatar({ redmineUserId, name, size = 28, className = '', o
       } ${className}`}
       style={{ width: size, height: size, fontSize: Math.round(size * 0.4) }}
     >
-      {src ? <img src={src} alt={name} className="w-full h-full object-cover" /> : initials}
+      {pending ? (
+        <Loader2 size={Math.round(size * 0.5)} className="animate-spin" />
+      ) : src ? (
+        <img src={src} alt={name} className="w-full h-full object-cover" />
+      ) : (
+        initials
+      )}
     </div>
   );
 }

@@ -15,6 +15,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import type { Issue } from '../types/redmine';
+import { PersonAvatar } from './PersonAvatar';
 
 const TEAM_ORDER = [
   'Desenvolvimento',
@@ -170,18 +171,13 @@ export function TeamView({ onIssueClick }: Props) {
                         onClick={() => toggle(p.id)}
                         className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors"
                       >
-                        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                          {p.id === 0 ? (
+                        {p.id === 0 ? (
+                          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white flex-shrink-0">
                             <User size={14} />
-                          ) : (
-                            p.name
-                              .split(' ')
-                              .map((w) => w[0])
-                              .slice(0, 2)
-                              .join('')
-                              .toUpperCase()
-                          )}
-                        </div>
+                          </div>
+                        ) : (
+                          <PersonAvatar redmineUserId={p.id} name={p.name} size={28} />
+                        )}
                         <span className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate flex-1 text-left">
                           {p.name}
                         </span>

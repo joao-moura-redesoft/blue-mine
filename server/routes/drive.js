@@ -8,6 +8,7 @@ const handle = require('../lib/handle');
 const { makeTalk } = require('../services/talk');
 const { getMyUserId, buildAuthHeaders } = require('../lib/redmine');
 const { getTalkAuth } = require('../services/talkStore');
+const { getInternalCaAgent } = require('../lib/internalCa');
 
 const xml = new XMLParser({ removeNSPrefix: true, ignoreAttributes: true, parseTagValue: false });
 
@@ -227,6 +228,7 @@ router.post(
       headers: { ...rmHeaders, 'Content-Type': 'application/octet-stream' },
       maxBodyLength: Infinity,
       maxContentLength: Infinity,
+      ...(getInternalCaAgent() ? { httpsAgent: getInternalCaAgent() } : {}),
     });
     const token = up.data?.upload?.token;
     if (!token) return res.status(502).json({ error: 'Falha ao enviar o arquivo ao Redmine.' });
@@ -237,7 +239,10 @@ router.post(
     await axios.put(
       `${url}/issues/${encodeURIComponent(issueId)}.json`,
       { issue },
-      { headers: { ...rmHeaders, 'Content-Type': 'application/json' } },
+      {
+        headers: { ...rmHeaders, 'Content-Type': 'application/json' },
+        ...(getInternalCaAgent() ? { httpsAgent: getInternalCaAgent() } : {}),
+      },
     );
 
     res.json({ success: true, filename: name, issueId: Number(issueId) });

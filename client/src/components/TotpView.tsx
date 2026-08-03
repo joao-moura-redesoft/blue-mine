@@ -3,6 +3,7 @@ import { Plus, Copy, Trash2, Check, ShieldCheck, KeyRound, Eye, EyeOff } from 'l
 import { totpRemaining } from '../utils/totp';
 import { listTotp, addTotp, deleteTotp, type TotpEntry } from '../api/totp';
 import { ConfirmDialog } from './workflow/ConfirmDialog';
+import { errorDetail } from '../utils/httpError';
 
 // SVG countdown ring
 function CountdownRing({ remaining, total = 30 }: { remaining: number; total?: number }) {
@@ -161,10 +162,10 @@ export function TotpView() {
     setAdding(true);
     try {
       await addTotp(name.trim(), cleanSecret);
-    } catch (e: any) {
+    } catch (e) {
       setAdding(false);
       return setFormError(
-        e?.response?.data?.error === 'semente inválida'
+        errorDetail(e) === 'semente inválida'
           ? 'Segredo inválido. Verifique se copiou corretamente.'
           : 'Não foi possível salvar. Tente novamente.',
       );

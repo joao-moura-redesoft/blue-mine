@@ -12,8 +12,9 @@ interface AiErrorShape {
 function upstreamDetail(data: { error?: unknown } | undefined): string | undefined {
   const e = data?.error;
   if (typeof e === 'string') return e;
-  if (e && typeof e === 'object' && 'message' in e && typeof (e as any).message === 'string') {
-    return (e as any).message;
+  if (e && typeof e === 'object' && 'message' in e) {
+    const msg = (e as { message: unknown }).message;
+    if (typeof msg === 'string') return msg;
   }
   return undefined;
 }

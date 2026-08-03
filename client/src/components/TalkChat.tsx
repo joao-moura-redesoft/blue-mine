@@ -1,6 +1,7 @@
-import { useState, useRef, useEffect, useCallback, useMemo, Fragment } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, Fragment, lazy, Suspense } from 'react';
 import {
   MessageSquare,
+  ExternalLink,
   X,
   Minus,
   Send,
@@ -51,7 +52,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { useJitsi } from './jitsi/JitsiContext';
-import { CreateIssueModal } from './CreateIssueModal';
+import { TalkReconnectModal } from './TalkReconnectModal';
 import { FilePreviewModal, isPreviewable } from './FilePreview';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { useBrowserNotifications } from '../hooks/useBrowserNotifications';
@@ -72,13 +73,17 @@ import {
   useTypingSender,
   useTalkSSE,
   useUserStatuses,
+  useRedmineIdForNcUid,
 } from '../hooks/useTalk';
 import {
   getTalkAuth,
+  getCachedTalkUid,
   resolveMessageText,
   fetchParticipants,
   markMessagesRead,
   uploadFileToTalk,
+  MAX_UPLOAD_BYTES,
+  uploadErrorMessage,
   fetchMessages,
   fetchTalkUser,
   createRoom,
@@ -104,6 +109,8 @@ import {
   translateMessage,
   suggestReplies,
   TALK_AUTH_EXPIRED_EVENT,
+  TALK_AUTH_CHANGED_EVENT,
+  getTalkAuthFailure,
 } from '../api/talk';
 import type { UserStatusType } from '../api/talk';
 import { getStoredAuth, authHeaders, redmineApi } from '../api/redmine';
@@ -122,6 +129,13 @@ import {
   differenceInCalendarDays,
 } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+
+// Lazy: enquanto este import era estático, o módulo voltava para o chunk
+// principal e anulava o lazy() do App.tsx — o Vite avisa no build com
+// "dynamic import will not move module into another chunk".
+const CreateIssueModal = lazy(() =>
+  import('./CreateIssueModal').then((m) => ({ default: m.CreateIssueModal })),
+);
 
 // ─── Markdown simples ─────────────────────────────────────────────────────────
 
@@ -393,12 +407,14 @@ function UserProfilePopup({
   myId,
   onClose,
   onOpenDM,
+  onOpenPerson,
 }: {
   actorId: string;
   displayName: string;
   myId: string;
   onClose: () => void;
   onOpenDM: (userId: string) => void;
+  onOpenPerson?: (redmineId: number) => void;
 }) {
   const { data: profile, isLoading } = useQuery({
     queryKey: ['talk-user-profile', actorId],
@@ -406,6 +422,7 @@ function UserProfilePopup({
     staleTime: 5 * 60 * 1000,
   });
   const { data: statuses } = useUserStatuses();
+  const redmineId = useRedmineIdForNcUid(actorId);
   const userStatus = statuses?.get(actorId);
   const isSelf = actorId === myId;
   const name = profile?.displayName || displayName;
@@ -421,7 +438,7 @@ function UserProfilePopup({
 
   return (
     <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 p-4"
+      className="fixed inset-0 z-[120] flex items-center justify-center modal-backdrop p-4"
       onClick={onClose}
     >
       <div
@@ -487,6 +504,17 @@ function UserProfilePopup({
               className="mt-3 w-full flex items-center justify-center gap-2 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 text-white text-sm font-medium rounded-xl transition-all duration-200"
             >
               <MessageSquare size={14} /> Mensagem Direta
+            </button>
+          )}
+          {onOpenPerson && redmineId && (
+            <button
+              onClick={() => {
+                onOpenPerson(redmineId);
+                onClose();
+              }}
+              className="w-full flex items-center justify-center gap-2 py-2 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-sm font-medium rounded-xl transition-colors"
+            >
+              <ExternalLink size={14} /> Ver tarefas no Redmine
             </button>
           )}
         </div>
@@ -581,6 +609,9 @@ function TalkImage({
       active = false;
       if (urlRef.current) URL.revokeObjectURL(urlRef.current);
     };
+    // Chaveado no arquivo. `auth`/`actorId` são estáveis na sessão; incluí-los
+    // rebaixaria o blob e recriaria o object URL sem necessidade.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileId, path]);
 
   if (!src) {
@@ -731,6 +762,8 @@ function TalkAudio({
       active = false;
       if (urlRef.current) URL.revokeObjectURL(urlRef.current);
     };
+    // Idem: só a identidade do arquivo importa para refazer o download.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file.id]);
 
   const toggle = () => {
@@ -1278,7 +1311,7 @@ function ForwardDialog({ msgs, onClose }: { msgs: TalkMessage[]; onClose: () => 
 
   return (
     <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 p-4"
+      className="fixed inset-0 z-[120] flex items-center justify-center modal-backdrop p-4"
       onClick={onClose}
     >
       <div
@@ -1410,7 +1443,7 @@ function AttachNoteDialog({
 
   return (
     <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 p-4"
+      className="fixed inset-0 z-[120] flex items-center justify-center modal-backdrop p-4"
       onClick={onClose}
     >
       <div
@@ -1572,7 +1605,7 @@ function ReminderDialog({
 
   return (
     <div
-      className="fixed inset-0 z-[130] flex items-center justify-center bg-black/30 p-4"
+      className="fixed inset-0 z-[130] flex items-center justify-center modal-backdrop p-4"
       onClick={onClose}
     >
       <div
@@ -1692,7 +1725,6 @@ function Bubble({
   onToggleSelect,
   onAvatarClick,
   onShowInfo,
-  myId,
   mentionsMe,
   readers,
   numActiveParticipants,
@@ -2470,7 +2502,7 @@ function MessageInput({
       if (result.success) qc.invalidateQueries({ queryKey: ['talk-messages', token] });
       else if (result.error) setUploadError(result.error);
     } catch (e: unknown) {
-      setUploadError((e instanceof Error ? e.message : null) || 'Falha ao enviar o áudio.');
+      setUploadError(uploadErrorMessage(e));
     } finally {
       setUploading(false);
     }
@@ -2481,6 +2513,10 @@ function MessageInput({
   // Coloca o arquivo em "rascunho" (preview) em vez de enviar direto
   const stagePendingFile = (file: File) => {
     setUploadError('');
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setUploadError('Arquivo muito grande (máx. 100MB).');
+      return;
+    }
     setPendingFile(file);
     setPendingPreview(file.type.startsWith('image/') ? URL.createObjectURL(file) : null);
     setTimeout(() => inputRef.current?.focus(), 0);
@@ -2503,6 +2539,9 @@ function MessageInput({
       // Ao sair do modo edição, restaura o rascunho da sala (em vez de limpar)
       setInput(localStorage.getItem(draftKey) ?? '');
     }
+    // draftKey é constante nesta instância: cada sala tem seu próprio
+    // ChatWindow (keyed por room.token), então não há troca de sala aqui.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editValue]);
 
   // Persiste o rascunho enquanto não está editando (e limpa quando esvazia/envia)
@@ -2636,7 +2675,7 @@ function MessageInput({
           setUploadError(result.error);
         }
       } catch (e: unknown) {
-        setUploadError((e instanceof Error ? e.message : null) || 'Falha ao enviar arquivo.');
+        setUploadError(uploadErrorMessage(e));
       } finally {
         setUploading(false);
       }
@@ -2993,6 +3032,7 @@ function ChatWindow({
   onMinimize,
   myId,
   onIssueClick,
+  onOpenPerson,
   hasNewMsg,
   onOpenRoom,
 }: {
@@ -3001,6 +3041,7 @@ function ChatWindow({
   onMinimize: () => void;
   myId: string;
   onIssueClick?: (id: number) => void;
+  onOpenPerson?: (redmineId: number) => void;
   hasNewMsg: boolean;
   onOpenRoom: (room: TalkRoom) => void;
 }) {
@@ -3095,12 +3136,17 @@ function ChatWindow({
     setIsDragging(false);
     const file = e.dataTransfer.files[0];
     if (!file) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      alert('Arquivo muito grande (máx. 100MB).');
+      return;
+    }
     setDropUploading(true);
     try {
       const result = await uploadFileToTalk(room.token, file);
       if (result.success) qc.invalidateQueries({ queryKey: ['talk-messages', room.token] });
-    } catch {
-      /* silencia — o upload já mostra erro no MessageInput */
+      else if (result.error) alert(result.error);
+    } catch (e: unknown) {
+      alert(uploadErrorMessage(e));
     } finally {
       setDropUploading(false);
     }
@@ -3314,14 +3360,21 @@ function ChatWindow({
     [room.token, room.displayName],
   );
 
-  // Conexão
-  const [connected, setConnected] = useState(true);
-
   // SSE para tempo real
-  // SSE começa pelo lastMessage.id da sala (já disponível no listing de rooms),
-  // garantindo que nunca faça catch-up por mensagens históricas. Só recebe mensagens futuras.
-  const sseStartId = room.lastMessage?.id ?? 0;
-  const { typingUsers } = useTalkSSE(room.token, sseStartId);
+  // Âncora = a mais nova mensagem REALMENTE carregada por `messages` (não room.lastMessage.id).
+  // O Talk às vezes indexa a listagem de salas mais rápido que o GET de mensagens: usar
+  // lastMessage.id da sala como âncora faz o SSE assumir "já conhecido" uma mensagem que
+  // o fetch normal ainda não retornou (atraso de indexação) — ela some da conversa pra
+  // sempre, mesmo continuando visível na prévia da lista lateral. Ancorar no que já carregou
+  // garante que o SSE feche essa lacuna.
+  const sseStartId = useMemo(
+    () => messages.reduce((max, m) => (m.id > max ? m.id : max), 0),
+    [messages],
+  );
+  // `connected` vem do próprio EventSource (onopen/onerror) — antes era um
+  // useState(true) que ninguém atualizava, então o indicador nunca saía de
+  // "Conectado" mesmo com o SSE caído.
+  const { typingUsers, connected } = useTalkSSE(room.token, sseStartId);
 
   // Combina recentes + antigas, deduplica por ID e ordena newest-first.
   // Ordenação explícita garante exibição correta independente da ordem da API.
@@ -3440,6 +3493,8 @@ function ChatWindow({
 
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+    // `qc` do useQueryClient é estável entre renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastMsgId, room.token]);
 
   const scrollToBottom = useCallback((force = false) => {
@@ -4123,6 +4178,7 @@ function ChatWindow({
           myId={myId}
           onClose={() => setProfileUser(null)}
           onOpenDM={openDM}
+          onOpenPerson={onOpenPerson}
         />
       )}
 
@@ -4170,14 +4226,16 @@ function ChatWindow({
         />
       )}
 
-      {taskInitial && (
-        <CreateIssueModal
-          initialSubject={taskInitial.subject}
-          initialDescription={taskInitial.description}
-          initialFiles={taskInitial.files}
-          onClose={() => setTaskInitial(null)}
-        />
-      )}
+      <Suspense fallback={null}>
+        {taskInitial && (
+          <CreateIssueModal
+            initialSubject={taskInitial.subject}
+            initialDescription={taskInitial.description}
+            initialFiles={taskInitial.files}
+            onClose={() => setTaskInitial(null)}
+          />
+        )}
+      </Suspense>
 
       {preparingTask && (
         <div className="absolute inset-0 z-[60] flex items-center justify-center bg-white/70 dark:bg-slate-900/70 rounded-xl">
@@ -4335,7 +4393,7 @@ function GroupInfoPanel({
 
   return (
     <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 p-4"
+      className="fixed inset-0 z-[120] flex items-center justify-center modal-backdrop p-4"
       onClick={onClose}
     >
       <div
@@ -4645,6 +4703,8 @@ function ShareThumb({ msg }: { msg: TalkMessage }) {
       active = false;
       if (urlRef.current) URL.revokeObjectURL(urlRef.current);
     };
+    // Idem: só a identidade do arquivo importa para refazer o download.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file?.id, isImage]);
 
   const handleClick = () => {
@@ -4735,7 +4795,7 @@ function MediaPanel({
 
   return (
     <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 p-4"
+      className="fixed inset-0 z-[120] flex items-center justify-center modal-backdrop p-4"
       onClick={onClose}
     >
       <div
@@ -4860,7 +4920,7 @@ function MessageInfoPanel({
 
   return (
     <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 p-4"
+      className="fixed inset-0 z-[120] flex items-center justify-center modal-backdrop p-4"
       onClick={onClose}
     >
       <div
@@ -5228,7 +5288,7 @@ function SavedScheduledPanel({
 
   return (
     <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 p-4"
+      className="fixed inset-0 z-[120] flex items-center justify-center modal-backdrop p-4"
       onClick={onClose}
     >
       <div
@@ -5533,29 +5593,53 @@ function ConversationsPanel({
 
 export function TalkChat({
   onIssueClick,
+  onOpenPerson,
   openRoomToken,
   onRoomOpened,
   onOpenSettings,
 }: {
   onIssueClick?: (id: number) => void;
+  onOpenPerson?: (redmineId: number) => void;
   openRoomToken?: string | null;
   onRoomOpened?: () => void;
   onOpenSettings?: () => void;
 }) {
   const auth = getTalkAuth();
   const [authExpired, setAuthExpired] = useState(false);
+  const [showReconnect, setShowReconnect] = useState(false);
+  const qc = useQueryClient();
 
   // Token (senha de app) revogado/expirado → o servidor responde 401 e o interceptor
-  // dispara este evento. Mostramos um aviso para reconectar nas Configurações.
+  // dispara este evento. Mostramos um aviso com acesso direto à reconexão.
   useEffect(() => {
     const onExpired = () => setAuthExpired(true);
     window.addEventListener(TALK_AUTH_EXPIRED_EVENT, onExpired);
     return () => window.removeEventListener(TALK_AUTH_EXPIRED_EVENT, onExpired);
   }, []);
-  const qc = useQueryClient();
+
+  // Conta (re)vinculada: limpa o aviso e refaz as queries do Talk. Sem isto o
+  // chat continuava morto depois de reconectar — as queries ficam `enabled:
+  // talkEnabled()` e as que já falharam não voltam sozinhas; só recarregando a
+  // página é que o chat ressuscitava.
+  useEffect(() => {
+    const onChanged = () => {
+      setAuthExpired(false);
+      qc.invalidateQueries({ queryKey: ['talk-me'] });
+      qc.invalidateQueries({ queryKey: ['talk-rooms'] });
+      qc.invalidateQueries({ queryKey: ['talk-messages'] });
+      qc.invalidateQueries({ queryKey: ['talk-redmine-match'] });
+    };
+    window.addEventListener(TALK_AUTH_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(TALK_AUTH_CHANGED_EVENT, onChanged);
+  }, [qc]);
   const { data: rooms = [] } = useTalkRooms();
   const { data: me } = useTalkCurrentUser();
-  const myId = me?.id ?? auth?.user ?? '';
+  // NÃO usar auth.user como reserva: ele é o login ("joao.moura"), enquanto o
+  // actorId das mensagens é o id interno do Nextcloud (UUID, contas LDAP). Os
+  // dois nunca casam, então esse fallback não "degradava" — ele garantia que
+  // toda mensagem minha aparecesse do lado do interlocutor. O cache em disco
+  // guarda o último actorId confirmado (ver cacheTalkUid).
+  const myId = me?.id || getCachedTalkUid();
   const [panelOpen, setPanelOpen] = useState(false);
   const [openChats, setOpenChats] = useState<TalkRoom[]>([]);
   const [minimized, setMinimized] = useState<Set<string>>(new Set());
@@ -5735,6 +5819,7 @@ export function TalkChat({
                 onMinimize={() => toggleMinimize(room.token)}
                 myId={myId}
                 onIssueClick={onIssueClick}
+                onOpenPerson={onOpenPerson}
                 hasNewMsg={hasNewMsg}
                 onOpenRoom={openChat}
               />
@@ -5744,31 +5829,47 @@ export function TalkChat({
       })}
 
       <div className="flex flex-col items-stretch">
-        {authExpired && (
-          <div className="mb-1 w-64 bg-amber-50 border border-amber-300 rounded-xl shadow-lg px-3 py-2.5 text-xs text-amber-800">
-            <p className="font-semibold mb-1">Conexão com o Talk expirou</p>
-            <p className="mb-2 text-amber-700">
-              O token (senha de app) parece ter sido revogado. Reconecte para voltar a receber
-              mensagens.
-            </p>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  setAuthExpired(false);
-                  onOpenSettings?.();
-                }}
-                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-medium transition-colors"
-              >
-                Reconectar
-              </button>
-              <button
-                onClick={() => setAuthExpired(false)}
-                className="px-2 py-1 text-amber-600 hover:text-amber-800 transition-colors"
-              >
-                Dispensar
-              </button>
-            </div>
-          </div>
+        {authExpired &&
+          (() => {
+            // O mesmo 401 sai por motivos diferentes; o servidor já os distingue.
+            // Dizer "o token foi revogado" quando o que caiu foi a sessão do
+            // Bluemine mandava o usuário para o conserto errado.
+            const redmineSession = getTalkAuthFailure().redmineSession;
+            return (
+              <div className="mb-1 w-72 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-xl shadow-lg px-3.5 py-3 text-xs text-amber-900 dark:text-amber-200">
+                <p className="font-semibold mb-1">
+                  {redmineSession ? 'Sua sessão do Bluemine expirou' : 'O chat foi desconectado'}
+                </p>
+                <p className="mb-2.5 text-amber-800/90 dark:text-amber-300/90">
+                  {redmineSession
+                    ? 'Entre no app novamente — o chat volta junto, sem precisar reconectar o Nextcloud.'
+                    : 'A senha de app usada pelo chat não é mais aceita. Reconecte para voltar a receber mensagens.'}
+                </p>
+                <div className="flex items-center gap-2">
+                  {!redmineSession && (
+                    <button
+                      onClick={() => setShowReconnect(true)}
+                      className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-medium transition-colors"
+                    >
+                      Reconectar
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setAuthExpired(false)}
+                    className="px-2 py-1 text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-200 transition-colors"
+                  >
+                    Dispensar
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
+        {showReconnect && (
+          <TalkReconnectModal
+            onClose={() => setShowReconnect(false)}
+            onOpenSettings={onOpenSettings}
+          />
         )}
         {panelOpen ? (
           <ConversationsPanel

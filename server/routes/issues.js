@@ -15,6 +15,7 @@ const { mapLimit, fetchAllIssues } = require('../lib/pagination');
 const { parseEditFormSchema } = require('../lib/editFormSchema');
 const { REDMINE_CF, REDMINE_STATUS } = require('../lib/config');
 const { sanitizeIssueBody, toLatin1Safe } = require('../lib/latin1');
+const { getInternalCaAgent } = require('../lib/internalCa');
 
 // Filtros nomeados por campo custom, resolvidos pela config central (env-overridable).
 const CF_DEVELOPER = `cf_${REDMINE_CF.developer}`;
@@ -442,6 +443,7 @@ router.post(
       },
       maxBodyLength: Infinity,
       maxContentLength: Infinity,
+      ...(getInternalCaAgent() ? { httpsAgent: getInternalCaAgent() } : {}),
     });
     res.json({ token: data.upload?.token, filename });
   }),

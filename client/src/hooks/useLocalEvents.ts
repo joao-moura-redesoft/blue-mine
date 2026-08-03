@@ -16,7 +16,10 @@ export function useCreateLocalEvent() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (payload: CreateLocalEventPayload) => eventsApi.create(payload),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['local-events'] }),
+    // refetchType: 'all' — Mês e Semana são consultas com janelas [start,end]
+    // diferentes; sem isso só a que está ativa na tela recarrega na hora (ver
+    // mesmo comentário em useZimbraEvents.ts/useCreateEvent).
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['local-events'], refetchType: 'all' }),
   });
 }
 
@@ -25,6 +28,6 @@ export function useDeleteLocalEvent() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => eventsApi.remove(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['local-events'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['local-events'], refetchType: 'all' }),
   });
 }

@@ -86,7 +86,7 @@ export function DigestModal({ onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[60] flex items-center justify-center modal-backdrop p-4"
       onClick={onClose}
     >
       <div

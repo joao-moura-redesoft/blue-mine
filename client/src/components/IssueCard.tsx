@@ -29,13 +29,14 @@ import { useAllowedStatuses, useCurrentUser, usePrefetchIssue } from '../hooks/u
 import { useJitsiPresence } from '../hooks/useJitsiPresence';
 import { useJitsi } from './jitsi/JitsiContext';
 import { makeTaskRoom } from '../utils/jitsiConfig';
+import { PersonAvatar } from './PersonAvatar';
 
 const PRIORITY_COLORS: Record<string, string> = {
-  Baixa: 'bg-slate-100 text-slate-600',
-  Normal: 'bg-blue-100 text-blue-700',
-  Média: 'bg-blue-100 text-blue-700',
-  Alta: 'bg-orange-100 text-orange-700',
-  Urgente: 'bg-red-100 text-red-700',
+  Baixa: 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300',
+  Normal: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300',
+  Média: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300',
+  Alta: 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300',
+  Urgente: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300',
   Imediata: 'bg-red-600 text-white',
 };
 
@@ -120,57 +121,59 @@ function QuickStatusMenu({
           setOpen((v) => !v);
         }}
         title="Mudar status"
-        className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-slate-100 hover:bg-blue-100 hover:text-blue-700 text-slate-600 transition-colors"
+        className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-slate-100 dark:bg-slate-700 hover:bg-blue-100 dark:hover:bg-blue-900/30 hover:text-blue-700 dark:hover:text-blue-400 text-slate-600 dark:text-slate-300 transition-colors"
       >
         <ArrowLeftRight size={11} />
         Status
       </button>
-      {open && menuPos && createPortal(
-        <>
-          <div
-            className="fixed inset-0 z-[90]"
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(false);
-            }}
-            onPointerDown={(e) => e.stopPropagation()}
-          />
-          <div
-            className="fixed bg-white border border-slate-200 rounded-lg shadow-xl z-[91] w-52 py-1 max-h-52 overflow-y-auto scrollbar-thin"
-            style={{ top: menuPos.top, left: menuPos.left }}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            {loading && (
-              <p className="px-3 py-2 text-xs text-slate-400 flex items-center gap-1.5">
-                <Loader2 size={11} className="animate-spin" /> Carregando transições…
-              </p>
-            )}
-            {!loading && allowedIds && allowedIds.length === 0 && (
-              <p className="px-3 py-2 text-xs text-amber-600 border-b border-slate-100">
-                Sem transições permitidas no workflow.
-              </p>
-            )}
-            {!loading &&
-              visibleStatuses.map((s) => (
-                <button
-                  key={s.id}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onStatusChange(issue.id, s.id);
-                    setOpen(false);
-                  }}
-                  className={`w-full flex items-center justify-between px-3 py-1.5 text-xs transition-colors
-                  ${s.id === issue.status.id ? 'font-semibold text-blue-600 bg-blue-50' : 'hover:bg-blue-50 text-slate-700'}
+      {open &&
+        menuPos &&
+        createPortal(
+          <>
+            <div
+              className="fixed inset-0 z-[90]"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen(false);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+            />
+            <div
+              className="fixed bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl z-[91] w-52 py-1 max-h-52 overflow-y-auto scrollbar-thin"
+              style={{ top: menuPos.top, left: menuPos.left }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              {loading && (
+                <p className="px-3 py-2 text-xs text-slate-400 dark:text-slate-500 flex items-center gap-1.5">
+                  <Loader2 size={11} className="animate-spin" /> Carregando transições…
+                </p>
+              )}
+              {!loading && allowedIds && allowedIds.length === 0 && (
+                <p className="px-3 py-2 text-xs text-amber-600 dark:text-amber-400 border-b border-slate-100 dark:border-slate-700">
+                  Sem transições permitidas no workflow.
+                </p>
+              )}
+              {!loading &&
+                visibleStatuses.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onStatusChange(issue.id, s.id);
+                      setOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-3 py-1.5 text-xs transition-colors
+                  ${s.id === issue.status.id ? 'font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30' : 'hover:bg-blue-50 dark:hover:bg-blue-900/20 text-slate-700 dark:text-slate-300'}
                 `}
-                >
-                  <span>{s.name}</span>
-                  {s.id === issue.status.id && <Check size={11} />}
-                </button>
-              ))}
-          </div>
-        </>,
-        document.body,
-      )}
+                  >
+                    <span>{s.name}</span>
+                    {s.id === issue.status.id && <Check size={11} />}
+                  </button>
+                ))}
+            </div>
+          </>,
+          document.body,
+        )}
     </div>
   );
 }
@@ -193,8 +196,8 @@ function CopyBranchButton({ branch }: { branch: string }) {
       title={`Copiar branch: ${branch}`}
       className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium transition-colors ${
         copied
-          ? 'bg-green-100 text-green-700'
-          : 'bg-slate-100 hover:bg-green-100 hover:text-green-700 text-slate-600'
+          ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300'
+          : 'bg-slate-100 dark:bg-slate-700 hover:bg-green-100 dark:hover:bg-green-900/30 hover:text-green-700 dark:hover:text-green-400 text-slate-600 dark:text-slate-300'
       }`}
     >
       {copied ? <Check size={11} /> : <Copy size={11} />}
@@ -207,7 +210,7 @@ function CopyBranchButton({ branch }: { branch: string }) {
 function MissingFieldsBadge({ fields }: { fields: string[] }) {
   return (
     <div className="relative group/missing">
-      <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-medium">
+      <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 text-xs font-medium">
         <AlertTriangle size={10} />
         {fields.length}
       </div>
@@ -232,7 +235,7 @@ function ReviewBadge({ type }: { type: 'today' | 'overdue' }) {
   if (type === 'today') {
     return (
       <div className="relative group/review">
-        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-medium animate-pulse">
+        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 text-xs font-medium animate-pulse">
           <BellRing size={10} />
           Enviar hoje
         </div>
@@ -249,7 +252,7 @@ function ReviewBadge({ type }: { type: 'today' | 'overdue' }) {
 
   return (
     <div className="relative group/review">
-      <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 text-xs font-medium">
+      <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 text-xs font-medium">
         <Bell size={10} />
         Revisão atrasada
       </div>
@@ -294,7 +297,7 @@ function LiveBadge({ issue, compact }: { issue: Issue; compact?: boolean }) {
         onPointerDown={(e) => e.stopPropagation()}
         onClick={join}
         title={`AO VIVO — ${info?.count} na sala. Clique para entrar.`}
-        className="flex items-center gap-1 text-[10px] font-bold text-red-600 flex-shrink-0"
+        className="flex items-center gap-1 text-[10px] font-bold text-red-600 dark:text-red-400 flex-shrink-0"
       >
         {dot} AO VIVO
       </button>
@@ -306,7 +309,7 @@ function LiveBadge({ issue, compact }: { issue: Issue; compact?: boolean }) {
       onPointerDown={(e) => e.stopPropagation()}
       onClick={join}
       title={`Entrar na sala — ${info?.participants.join(', ') || ''}`}
-      className="flex items-center gap-1.5 mb-2 px-2 py-1 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-bold hover:bg-red-100 transition-colors"
+      className="flex items-center gap-1.5 mb-2 px-2 py-1 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-xs font-bold hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
     >
       {dot}
       <Video size={12} />
@@ -346,19 +349,22 @@ function SubtaskList({
   const pct = children.length > 0 ? (doneCount / children.length) * 100 : 0;
 
   return (
-    <div className="mt-2 pt-2 border-t border-slate-100" onPointerDown={(e) => e.stopPropagation()}>
+    <div
+      className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700"
+      onPointerDown={(e) => e.stopPropagation()}
+    >
       <button
         onClick={(e) => {
           e.stopPropagation();
           setOpen((v) => !v);
         }}
-        className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 w-full"
+        className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 w-full"
       >
         <ListTodo size={11} className="flex-shrink-0" />
         <span className="flex-shrink-0">
           {doneCount}/{children.length}
         </span>
-        <div className="flex-1 h-1 bg-slate-200 rounded-full overflow-hidden">
+        <div className="flex-1 h-1 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full transition-all ${pct === 100 ? 'bg-green-500' : 'bg-blue-400'}`}
             style={{ width: `${pct}%` }}
@@ -386,7 +392,7 @@ function SubtaskList({
                   className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 transition-colors ${
                     closed
                       ? 'bg-green-500 border-green-500'
-                      : 'border-slate-300 hover:border-blue-400 hover:bg-blue-50 disabled:opacity-40'
+                      : 'border-slate-300 dark:border-slate-600 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-40'
                   }`}
                 >
                   {closed && <Check size={9} className="text-white" />}
@@ -397,7 +403,9 @@ function SubtaskList({
                     onOpen?.(child.id);
                   }}
                   className={`text-xs flex-1 text-left truncate transition-colors ${
-                    closed ? 'line-through text-slate-400' : 'text-slate-600 hover:text-blue-600'
+                    closed
+                      ? 'line-through text-slate-400 dark:text-slate-500'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400'
                   }`}
                 >
                   {child.subject}
@@ -490,13 +498,34 @@ export function IssueCard({
       month: 'short',
     });
     const prefix = previsao ? 'Rev.' : '';
-    if (isDone) return { cls: 'bg-green-100 text-green-700', icon: '✓', label, prefix };
+    if (isDone)
+      return {
+        cls: 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300',
+        icon: '✓',
+        label,
+        prefix,
+      };
     if (date < today)
-      return { cls: 'bg-red-100 text-red-700 font-semibold', icon: null, label, prefix };
+      return {
+        cls: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 font-semibold',
+        icon: null,
+        label,
+        prefix,
+      };
     const diffDays = Math.ceil((new Date(date).getTime() - new Date(today).getTime()) / 86400000);
     if (diffDays <= 2)
-      return { cls: 'bg-yellow-100 text-yellow-800 font-semibold', icon: null, label, prefix };
-    return { cls: 'bg-slate-100 text-slate-600', icon: null, label, prefix };
+      return {
+        cls: 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-800 dark:text-yellow-300 font-semibold',
+        icon: null,
+        label,
+        prefix,
+      };
+    return {
+      cls: 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300',
+      icon: null,
+      label,
+      prefix,
+    };
   })();
 
   // ── Compact variant ──────────────────────────────────────────────────────
@@ -515,20 +544,24 @@ export function IssueCard({
           else onClick(issue);
         }}
         className={`
-          relative flex items-center gap-2 bg-white rounded border px-2 py-1 cursor-pointer select-none
+          relative flex items-center gap-2 bg-white dark:bg-slate-800 rounded border px-2 py-1 cursor-pointer select-none
           transition-all duration-150
-          ${focused ? 'border-blue-500 ring-2 ring-blue-500 ring-offset-1' : selected ? 'border-blue-400 ring-1 ring-blue-300' : 'border-slate-200'}
-          ${isDragging ? 'opacity-40 scale-95' : 'hover:border-blue-300 hover:shadow-sm'}
+          ${focused ? 'border-blue-500 ring-2 ring-blue-500 ring-offset-1' : selected ? 'border-blue-400 ring-1 ring-blue-300' : 'border-slate-200 dark:border-slate-700'}
+          ${isDragging ? 'opacity-40 scale-95' : 'hover:border-blue-300 dark:hover:border-blue-600 hover:shadow-sm'}
         `}
       >
         <span
           className={`w-2 h-2 rounded-full flex-shrink-0 ${PRIORITY_DOTS[issue.priority.name] ?? 'bg-slate-400'}`}
         />
-        <span className="text-xs text-slate-400 flex-shrink-0">#{issue.id}</span>
-        <span className="text-xs font-medium text-slate-800 truncate">{issue.subject}</span>
+        <span className="text-xs text-slate-400 dark:text-slate-500 flex-shrink-0">
+          #{issue.id}
+        </span>
+        <span className="text-xs font-medium text-slate-800 dark:text-slate-100 truncate">
+          {issue.subject}
+        </span>
         <LiveBadge issue={issue} compact />
         {isTimerRunning && (
-          <span className="flex items-center gap-0.5 text-[10px] font-mono text-green-600 bg-green-50 px-1.5 py-0.5 rounded flex-shrink-0 animate-pulse">
+          <span className="flex items-center gap-0.5 text-[10px] font-mono text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/30 px-1.5 py-0.5 rounded flex-shrink-0 animate-pulse">
             <Square size={8} className="fill-green-600" />
             {timerFormatted}
           </span>
@@ -552,11 +585,11 @@ export function IssueCard({
         else onClick(issue);
       }}
       className={`
-        relative bg-white rounded-lg border p-3 cursor-pointer select-none group
+        relative bg-white dark:bg-slate-800 rounded-lg border p-3 cursor-pointer select-none group
         transition-all duration-200
-        ${focused ? 'border-blue-500 ring-2 ring-blue-500 ring-offset-1' : selected ? 'border-blue-500 ring-2 ring-blue-300' : 'border-slate-200'}
+        ${focused ? 'border-blue-500 ring-2 ring-blue-500 ring-offset-1' : selected ? 'border-blue-500 ring-2 ring-blue-300' : 'border-slate-200 dark:border-slate-700'}
         ${isDragging && !isDragOverlay ? 'opacity-40 scale-95' : ''}
-        ${isDragOverlay ? 'shadow-2xl rotate-1 border-blue-300 scale-105' : 'shadow-sm hover:shadow-lg hover:shadow-slate-900/5 hover:border-blue-300 hover:-translate-y-0.5 active:scale-[0.99]'}
+        ${isDragOverlay ? 'shadow-2xl rotate-1 border-blue-300 scale-105' : 'shadow-sm hover:shadow-lg hover:border-blue-300 dark:hover:border-blue-600 hover:-translate-y-0.5 active:scale-[0.99]'}
       `}
     >
       {/* Checkbox inline — só no modo seleção */}
@@ -571,13 +604,15 @@ export function IssueCard({
           >
             <Check size={11} />
           </span>
-          <span className="text-xs text-slate-400">{selected ? 'Selecionada' : 'Selecionar'}</span>
+          <span className="text-xs text-slate-400 dark:text-slate-500">
+            {selected ? 'Selecionada' : 'Selecionar'}
+          </span>
         </div>
       )}
 
       {/* Badge de timer ativo */}
       {isTimerRunning && (
-        <div className="flex items-center gap-1.5 mb-2 px-2 py-1 rounded-lg bg-green-50 border border-green-200 text-green-700 text-xs font-medium animate-pulse">
+        <div className="flex items-center gap-1.5 mb-2 px-2 py-1 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 text-xs font-medium animate-pulse">
           <Square size={9} className="fill-green-600 flex-shrink-0" />
           <span className="font-mono">{timerFormatted}</span>
           <span className="font-normal opacity-70">em andamento</span>
@@ -597,7 +632,7 @@ export function IssueCard({
 
       {/* Tracker + Prioridade */}
       <div className="flex items-start justify-between gap-2 mb-2">
-        <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+        <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
           <Tag size={10} />
           {issue.tracker.name}
         </span>
@@ -612,15 +647,18 @@ export function IssueCard({
       </div>
 
       {/* Título */}
-      <p className="text-sm font-semibold text-slate-800 leading-snug mb-1.5 line-clamp-2 tracking-[-0.01em]">
-        <span className="font-medium text-slate-400">#{issue.id}</span> {issue.subject}
+      <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 leading-snug mb-1.5 line-clamp-2 tracking-[-0.01em]">
+        <span className="font-medium text-slate-400 dark:text-slate-500">#{issue.id}</span>{' '}
+        {issue.subject}
       </p>
 
       {/* Projeto */}
-      <p className="text-xs text-slate-400 mb-2 truncate">{issue.project.name}</p>
+      <p className="text-xs text-slate-400 dark:text-slate-500 mb-2 truncate">
+        {issue.project.name}
+      </p>
 
       {/* Footer: prazo estilo Trello + progresso + atualizado */}
-      <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
+      <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-700">
         <div className="flex items-center gap-1.5 flex-wrap min-w-0">
           {dueBadge ? (
             <span
@@ -631,28 +669,52 @@ export function IssueCard({
               {dueBadge.label}
             </span>
           ) : (
-            <span className="flex items-center gap-1 text-xs text-slate-300">
+            <span className="flex items-center gap-1 text-xs text-slate-400 dark:text-slate-500">
               <Clock size={11} />
               {formatDistanceToNow(new Date(issue.updated_on), { addSuffix: true, locale: ptBR })}
             </span>
           )}
         </div>
 
-        {issue.done_ratio > 0 && (
-          <div className="flex items-center gap-1 flex-shrink-0">
-            <div className="w-14 h-1.5 bg-slate-200 rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full ${issue.done_ratio === 100 ? 'bg-green-500' : 'bg-blue-500'}`}
-                style={{ width: `${issue.done_ratio}%` }}
-              />
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {issue.done_ratio > 0 && (
+            <div className="flex items-center gap-1">
+              <div className="w-14 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${issue.done_ratio === 100 ? 'bg-green-500' : 'bg-blue-500'}`}
+                  style={{ width: `${issue.done_ratio}%` }}
+                />
+              </div>
+              <span className="text-xs text-slate-400 dark:text-slate-500 tabular-nums">
+                {issue.done_ratio}%
+              </span>
             </div>
-            <span className="text-xs text-slate-400">{issue.done_ratio}%</span>
-          </div>
-        )}
+          )}
+          {issue.author && issue.assigned_to && issue.author.id !== issue.assigned_to.id && (
+            <PersonAvatar
+              redmineUserId={issue.author.id}
+              name={issue.author.name}
+              size={20}
+              className="ring-2 ring-white dark:ring-slate-800 -mr-2"
+            />
+          )}
+          {issue.assigned_to ? (
+            <PersonAvatar
+              redmineUserId={issue.assigned_to.id}
+              name={issue.assigned_to.name}
+              size={20}
+              className="ring-2 ring-white dark:ring-slate-800"
+            />
+          ) : (
+            issue.author && (
+              <PersonAvatar redmineUserId={issue.author.id} name={issue.author.name} size={20} />
+            )
+          )}
+        </div>
       </div>
 
       {dueBadge && (
-        <p className="text-xs text-slate-300 mt-1 flex items-center gap-1">
+        <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 flex items-center gap-1">
           <Clock size={10} />
           {formatDistanceToNow(new Date(issue.updated_on), { addSuffix: true, locale: ptBR })}
         </p>
@@ -694,7 +756,7 @@ export function IssueCard({
                   onTimerStop?.();
                 }}
                 title={`Parar timer (${timerFormatted})`}
-                className="flex items-center justify-center w-6 h-6 rounded bg-green-100 text-green-700 hover:bg-green-200 transition-colors animate-pulse"
+                className="flex items-center justify-center w-6 h-6 rounded bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/60 transition-colors animate-pulse"
               >
                 <Square size={10} className="fill-green-700" />
               </button>
@@ -711,7 +773,7 @@ export function IssueCard({
                     ? `Timer ativo em outra tarefa (#${activeTimerIssueId})`
                     : 'Iniciar timer'
                 }
-                className="flex items-center justify-center w-6 h-6 rounded bg-slate-100 text-slate-600 hover:bg-green-100 hover:text-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="flex items-center justify-center w-6 h-6 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-green-100 dark:hover:bg-green-900/40 hover:text-green-700 dark:hover:text-green-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 <Play size={10} className="fill-current" />
               </button>
@@ -724,7 +786,7 @@ export function IssueCard({
                 onArchive(issue.id);
               }}
               title="Arquivar localmente (ocultar sem alterar no Redmine)"
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-500 transition-colors ml-auto"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400 transition-colors ml-auto"
             >
               <Archive size={11} />
               Arquivar

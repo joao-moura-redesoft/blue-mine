@@ -150,33 +150,43 @@ server/dist-embedded.cjs
 bluemine-update.ps1
 SHA256SUMS
 
+# ATENÇÃO: os padrões abaixo são propositalmente SEM prefixo de pasta.
+# O DATA_DIR (server/lib/runtime.js) é server/ em `npm run dev`, mas
+# dirname(process.execPath) quando roda empacotado — e o bluemine.exe fica na
+# raiz do repo. Ou seja: os mesmos arquivos de runtime nascem em server/ OU na
+# raiz, dependendo de como o app foi iniciado. Um padrão sem barra casa em
+# qualquer nível, então cobre os dois casos. Não volte a prefixar com `server/`.
+
 # Web Push — NUNCA versionar (chave privada VAPID e API keys do Redmine das inscrições)
 vapid.json
 push-subscriptions.json
-server/vapid.json
-server/push-subscriptions.json
 
 # Config local de equipes
-server/teams.json
+teams.json
 
 # Sessões e credenciais cifradas em repouso — NUNCA versionar
-server/vault-key.json
-server/sessions.json
-server/talk.json
-server/secrets.json
-/database.db
+vault-key.json
+sessions.json
+talk.json
+secrets.json
+database.db
 
 # Dados de runtime do usuário (blobs DPAPI por-máquina) — não versionar:
 # contêm conteúdo pessoal e são inúteis em outro clone/máquina.
-server/notes.json
-server/boards.json
-server/sprints.json
-server/events.json
-server/workflows.json
-server/workflow-state.json
-server/workflow-runs.json
-server/digest-*.json
-server/talk-match-cache.json
+notes.json
+boards.json
+sprints.json
+events.json
+workflows.json
+workflow-state.json
+workflow-runs.json
+digest-*.json
+talk-match-cache.json
+ai-usage.json
+
+# CA interna (autoassinada) desta instalação de Redmine — específica da empresa,
+# não faz sentido em outro clone/instalação do Bluemine.
+redmine-ca.pem
 
 # Saída de execução do servidor (stdout/stderr) — gerada em runtime
 srv.out

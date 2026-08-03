@@ -9,6 +9,11 @@ require('dotenv').config();
 process.stdout.on('error', () => {});
 process.stderr.on('error', () => {});
 
+// CA interna (rede corporativa faz inspeção de TLS — ver lib/internalCa.js): aplica
+// ANTES de qualquer módulo que possa abrir conexão HTTPS (Redmine, Talk, Zimbra,
+// IA). Precisa vir cedo — é o que cobre o `fetch` nativo dos SDKs de IA.
+require('./lib/internalCa').applyGlobalCaTrust();
+
 const buildApp = require('./app');
 const { startPushPolling } = require('./services/push');
 const { startBridge } = require('./services/keyboardBridge');

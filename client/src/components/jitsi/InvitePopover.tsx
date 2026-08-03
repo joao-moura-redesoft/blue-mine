@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Search, Send, Check, Loader2, Users, User as UserIcon } from 'lucide-react';
 import {

@@ -3,6 +3,11 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
+  // Lê o .env da RAIZ do repositório, não de client/. Assim servidor (dotenv) e
+  // frontend (import.meta.env) compartilham um único arquivo de configuração —
+  // os endereços corporativos ficam definidos num lugar só. Ver
+  // client/src/utils/appDefaults.ts.
+  envDir: '..',
   plugins: [
     react(),
     VitePWA({

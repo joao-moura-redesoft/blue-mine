@@ -62,6 +62,15 @@ export interface MailSendPayload {
   inReplyTo?: string;
   attachments?: { aid: string }[];
   forwardParts?: ForwardPart[];
+  // Imagens embutidas no corpo (assinatura/rodapé): o HTML as referencia por
+  // src="cid:<cid>" e o servidor as monta em multipart/related.
+  inlineAttachments?: InlineAttachment[];
+}
+
+export interface InlineAttachment {
+  aid: string;
+  cid: string;
+  contentType?: string;
 }
 
 export interface CalendarEvent {
@@ -191,6 +200,23 @@ export const mailApi = {
         'Content-Type': 'application/octet-stream',
         'X-Filename': encodeURIComponent(file.name),
         'X-Content-Type': file.type || 'application/octet-stream',
+      },
+    });
+    return data;
+  },
+
+  // Mesma rota, a partir de bytes crus — usado pelas imagens inline, que vêm de
+  // um data URI no HTML e não de um File escolhido pelo usuário.
+  uploadBytes: async (
+    bytes: Uint8Array,
+    filename: string,
+    contentType: string,
+  ): Promise<UploadedAttachment> => {
+    const { data } = await api.post('/mail/upload', bytes, {
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-Filename': encodeURIComponent(filename),
+        'X-Content-Type': contentType || 'application/octet-stream',
       },
     });
     return data;

@@ -1,4 +1,5 @@
 const log = require('./logger');
+const { destroySession } = require('./session');
 
 const NETWORK_RE = /ECONNREFUSED|ETIMEDOUT|ENOTFOUND|ECONNRESET|EHOSTUNREACH/;
 
@@ -13,8 +14,29 @@ function safeNetworkMessage(err) {
   return 'Requisição inválida.';
 }
 
+// Credencial vencida (senha trocada no AD): a sessão guarda a senha antiga e
+// vale 30 dias, então sem isto o app fica "logado" tentando indefinidamente com
+// uma senha que não existe mais. Derrubar a sessão força um login limpo.
+// Só dispara com `credentialsStale`, marcado exclusivamente em falha de
+// AUTENTICAÇÃO (401) — nunca em 403, que é rotina com a key não-admin.
+function shouldDropStaleSession(err, req) {
+  return !!(err && err.credentialsStale) && !!(req && req.cookies && req.cookies.session_id);
+}
+
+function dropStaleSession(err, req, res) {
+  if (!shouldDropStaleSession(err, req)) return;
+  try {
+    destroySession(req.cookies.session_id);
+    res.clearCookie('session_id');
+  } catch {
+    /* derrubar a sessão é best-effort: não pode mascarar o erro original */
+  }
+}
+
 // eslint-disable-next-line no-unused-vars
 module.exports = function errorMiddleware(err, req, res, next) {
+  dropStaleSession(err, req, res);
+
   // AppError: mensagem intencional, segura para o cliente
   if (err.isSafe) return res.status(err.statusCode).json({ error: err.message });
 
@@ -41,3 +63,7 @@ module.exports = function errorMiddleware(err, req, res, next) {
 
   return res.status(status).json({ error: safeNetworkMessage(err) });
 };
+
+// Exposto para teste: a decisão é a parte com regra (401 marcado sim, 403 não),
+// enquanto o efeito em si é só delegar para destroySession.
+module.exports.shouldDropStaleSession = shouldDropStaleSession;

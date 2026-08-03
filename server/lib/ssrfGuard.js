@@ -5,6 +5,7 @@
 const dns = require('dns');
 const http = require('http');
 const https = require('https');
+const { loadCaList } = require('./internalCa');
 
 // IPv4/IPv6 em faixas privadas, loopback, link-local (metadata 169.254.169.254),
 // CGNAT e reservadas. Cobre também IPv4 mapeado em IPv6 (::ffff:a.b.c.d).
@@ -79,7 +80,14 @@ function safeLookup(hostname, options, callback) {
 }
 
 const safeHttpAgent = new http.Agent({ lookup: safeLookup });
-const safeHttpsAgent = new https.Agent({ lookup: safeLookup });
+// CA interna (se houver, ver lib/internalCa.js) combinada com o `lookup` anti-SSRF no
+// MESMO agente — trocar por getInternalCaAgent() aqui substituiria a proteção de SSRF
+// em vez de somar a ela.
+const internalCaList = loadCaList();
+const safeHttpsAgent = new https.Agent({
+  lookup: safeLookup,
+  ...(internalCaList ? { ca: internalCaList } : {}),
+});
 
 // Opções axios prontas para um GET seguro contra SSRF.
 function safeAgents() {

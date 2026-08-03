@@ -17,7 +17,6 @@ import {
   CATEGORY_OPTS,
   WEEKDAYS,
   BOOL_OPTS,
-  defFor,
   typeForField,
   fieldAvailable,
   operandsForType,
@@ -138,7 +137,21 @@ function Toggle({
 // realmente produzem, evitando sugerir algo que resolveria vazio.
 function VarHint({ ctx, outputs }: { ctx: TriggerContext; outputs: Set<string> }) {
   const tokens: string[] = [];
-  if (ctx.issue) tokens.push('{{issue.id}}', '{{issue.subject}}', '{{issue.status.name}}');
+  if (ctx.issue)
+    tokens.push(
+      '{{issue.id}}',
+      '{{issue.subject}}',
+      '{{issue.status.name}}',
+      '{{issue.project.name}}',
+      '{{issue.priority.name}}',
+      '{{issue.tracker.name}}',
+      '{{issue.assigned_to.name}}',
+      '{{issue.author.name}}',
+      '{{issue.due_date}}',
+      '{{issue.updated_days}}',
+      '{{issue.created_days}}',
+      '{{issue.due_days}}',
+    );
   if (ctx.talk) tokens.push('{{message.text}}', '{{message.actor}}', '{{room.name}}');
   if (ctx.comment) tokens.push('{{comment.text}}', '{{comment.author}}');
   if (ctx.email) tokens.push('{{email.subject}}', '{{email.from}}', '{{email.snippet}}');
@@ -492,18 +505,26 @@ export function NodeConfigPanel({
 
       {/* ---------- Gatilhos ---------- */}
       {node.type === 'issue.created' && (
-        <Field label="Categoria da tarefa">
-          <Select
-            value={str('category')}
-            onChange={(v) => patch({ category: v })}
-            options={[
-              { id: 'assigned', name: 'Atribuída a mim' },
-              { id: 'review', name: 'Para revisão' },
-              { id: 'monitored', name: 'Monitorada' },
-            ]}
-            emptyLabel="— qualquer categoria —"
-          />
-        </Field>
+        <>
+          <Field label="Categoria da tarefa">
+            <Select
+              value={str('category')}
+              onChange={(v) => patch({ category: v })}
+              options={[
+                { id: 'assigned', name: 'Recebida (atribuída a mim)' },
+                { id: 'authored', name: 'Criada por mim' },
+                { id: 'review', name: 'Para revisão' },
+                { id: 'monitored', name: 'Monitorada' },
+              ]}
+              emptyLabel="— qualquer categoria —"
+            />
+          </Field>
+          <p className="text-xs text-slate-400 dark:text-slate-500">
+            "Recebida" dispara quando a tarefa chega pra você (de quem quer que seja). "Criada por
+            mim" dispara quando VOCÊ é o autor — mesmo se atribuir a outra pessoa e ela sumir da sua
+            lista.
+          </p>
+        </>
       )}
 
       {node.type === 'issue.status_changed' && (
@@ -617,12 +638,16 @@ export function NodeConfigPanel({
                   onChange={(v) => patch({ scope: v })}
                   options={[
                     { id: 'assigned', name: 'Atribuídas a mim' },
+                    { id: 'authored', name: 'Criadas por mim' },
                     { id: 'review', name: 'Para revisão' },
                     { id: 'monitored', name: 'Monitoradas' },
-                    { id: 'all', name: 'Todas (as acima)' },
+                    { id: 'all', name: 'Todas (exceto criadas por mim)' },
                   ]}
                 />
               </Field>
+              {/* "Todas" é a união de atribuídas/revisão/monitoradas — NÃO inclui "criadas por
+                  mim" (tarefa que você criou pra outra pessoa não é sua "no dia a dia"; incluir
+                  silenciosamente mudaria o escopo de quem já usa "Todas" hoje). */}
               {/* Sem isso, a varredura reexecuta as ações a cada rodada enquanto a
                   condição seguir verdadeira — vira spam. */}
               <Field label="Repetir por tarefa">
@@ -849,6 +874,57 @@ export function NodeConfigPanel({
           <Field label="Mensagem (opcional)">
             <Text value={str('message')} onChange={(v) => patch({ message: v })} />
           </Field>
+          <VarHint ctx={tctx} outputs={outputs} />
+        </>
+      )}
+
+      {node.type === 'talk.notify_person' && (
+        <>
+          <Field label="Destinatário">
+            <Select
+              value={str('who') || 'assigned_to'}
+              onChange={(v) => patch({ who: v })}
+              options={[
+                { id: 'assigned_to', name: 'Responsável pela tarefa' },
+                { id: 'author', name: 'Autor da tarefa' },
+                { id: 'custom_field', name: 'Campo personalizado (ex.: Revisor)' },
+                { id: 'fixed', name: 'Pessoa fixa' },
+              ]}
+            />
+          </Field>
+          {str('who') === 'fixed' && (
+            <Field label="Pessoa">
+              <Select
+                value={str('userId')}
+                onChange={(v) => patch({ userId: v })}
+                options={meFirst}
+                emptyLabel="— selecione —"
+              />
+            </Field>
+          )}
+          {str('who') === 'custom_field' && (
+            <>
+              <Field label="Campo">
+                <Select
+                  value={str('customFieldId')}
+                  onChange={(v) => patch({ customFieldId: v })}
+                  options={customFieldOpts}
+                  emptyLabel="— selecione —"
+                />
+              </Field>
+              <p className="text-xs text-slate-400 dark:text-slate-500">
+                Precisa ser um campo do tipo "usuário/responsável" (ex.: Revisor, Desenvolvedor) —
+                outros tipos de campo não têm uma pessoa pra resolver.
+              </p>
+            </>
+          )}
+          <Field label="Mensagem">
+            <Area value={str('message')} onChange={(v) => patch({ message: v })} />
+          </Field>
+          <p className="text-xs text-slate-400 dark:text-slate-500">
+            Só funciona se a pessoa tiver vínculo com o Talk (por nome) e sua conta puder iniciar
+            conversa com ela — nem sempre é o caso.
+          </p>
           <VarHint ctx={tctx} outputs={outputs} />
         </>
       )}

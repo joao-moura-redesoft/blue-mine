@@ -6,6 +6,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 const OpenAI = require('openai');
 const { REDMINE_CF, AI_MODELS } = require('../lib/config');
 const aiUsage = require('./aiUsageStore');
+const { getInternalCaAgent } = require('../lib/internalCa');
 
 // Endpoint OpenAI-compatible do Gemini (Google AI Studio).
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
@@ -147,7 +148,12 @@ async function fetchAttachmentBase64(redmineUrl, authHeaders, attachId, filename
   try {
     const resp = await axios.get(
       `${redmineUrl}/attachments/download/${attachId}/${encodeURIComponent(filename)}`,
-      { headers: authHeaders, responseType: 'arraybuffer', maxContentLength: MAX_ATTACH_BYTES },
+      {
+        headers: authHeaders,
+        responseType: 'arraybuffer',
+        maxContentLength: MAX_ATTACH_BYTES,
+        ...(getInternalCaAgent() ? { httpsAgent: getInternalCaAgent() } : {}),
+      },
     );
     return {
       base64: Buffer.from(resp.data).toString('base64'),

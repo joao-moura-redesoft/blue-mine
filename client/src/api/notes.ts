@@ -1,5 +1,3 @@
-import axios from 'axios';
-import { getStoredAuth } from './redmine';
 import { createAuthedClient } from './client';
 
 export interface Note {
