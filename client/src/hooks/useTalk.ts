@@ -15,6 +15,8 @@ import {
   searchNCUsers,
   fetchUserStatuses,
   fetchRedmineTalkMatch,
+  isTalkAuthBroken,
+  subscribeTalkAuthBroken,
 } from '../api/talk';
 import type {
   TalkMessage,
@@ -23,11 +25,27 @@ import type {
   RedmineTalkMatch,
   TalkParticipant,
 } from '../api/talk';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { talkRead } from '../utils/talkRead';
 
 function talkEnabled() {
   return !!getTalkAuth();
+}
+
+/**
+ * Assina o disjuntor de autenticação do Talk (ver api/talk.ts).
+ *
+ * Enquanto a credencial estiver recusada, desligamos o POLLING — mas não as
+ * queries. A diferença importa: o refetch de foco de janela do TanStack continua
+ * valendo, então um 401 passageiro se cura sozinho quando o usuário volta para a
+ * aba, sem precisar religar a conta.
+ */
+function useTalkAuthBroken() {
+  return useSyncExternalStore(
+    subscribeTalkAuthBroken,
+    isTalkAuthBroken,
+    () => false, // sem DOM (SSR/teste): nunca "quebrado"
+  );
 }
 
 // Quem sou eu no Talk. Diferente das outras queries daqui, esta NÃO tinha
@@ -37,6 +55,7 @@ function talkEnabled() {
 // mensagens renderizavam como se fossem do outro lado. Daí o cache em disco e a
 // revalidação.
 export function useTalkCurrentUser() {
+  const authBroken = useTalkAuthBroken();
   return useQuery({
     queryKey: ['talk-me'],
     queryFn: async () => {
@@ -46,16 +65,21 @@ export function useTalkCurrentUser() {
     },
     enabled: talkEnabled(),
     staleTime: 30 * 60_000,
-    retry: 3,
+    // Com a credencial já recusada, `retry: 3` transforma cada tentativa em 4
+    // requisições — foi o que gerou os 462 erros deste endpoint no log.
+    retry: authBroken ? false : 3,
   });
 }
 
 export function useTalkRooms() {
+  const authBroken = useTalkAuthBroken();
   return useQuery({
     queryKey: ['talk-rooms'],
     queryFn: fetchRooms,
     enabled: talkEnabled(),
-    refetchInterval: 15_000,
+    // Credencial recusada: para o intervalo em vez de repetir o mesmo 401 a cada
+    // 15s para sempre. Rearma sozinho na primeira resposta boa.
+    refetchInterval: authBroken ? false : 15_000,
     // Sem isso o TanStack pausa o interval quando a aba perde o foco — e como o SW
     // suprime o push enquanto existe qualquer janela (mesmo minimizada), ficaríamos
     // sem notificação de Talk até voltar o foco.

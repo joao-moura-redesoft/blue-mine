@@ -25,6 +25,7 @@ export function saveTalkAuth(auth: TalkAuth) {
   // Trocou de conta? O actorId em cache é de outra pessoa e deixaria as bolhas
   // do lado errado até /talk/me responder. Ver getCachedTalkUid.
   if (previous && (previous.user !== auth.user || previous.url !== auth.url)) clearCachedTalkUid();
+  resetTalkAuthBroken(); // credencial nova → rearma o disjuntor do polling
   window.dispatchEvent(new CustomEvent(TALK_AUTH_CHANGED_EVENT));
 }
 
@@ -67,6 +68,7 @@ export function clearCachedTalkUid() {
 export async function clearTalkAuth() {
   localStorage.removeItem(TALK_AUTH_KEY);
   clearCachedTalkUid();
+  resetTalkAuthBroken();
   window.dispatchEvent(new CustomEvent(TALK_AUTH_CHANGED_EVENT));
   try {
     await axios.delete('/api/talk/auth');
@@ -173,8 +175,51 @@ export function getTalkAuthFailure(): TalkAuthFailure {
   return lastAuthFailure;
 }
 
+/**
+ * Disjuntor do polling do Talk.
+ *
+ * `talkEnabled()` só verifica se EXISTE credencial salva, não se ela funciona.
+ * Com senha de app revogada (ou troca de senha do AD), a lista de salas seguia
+ * sendo pedida a cada 15s, em segundo plano, indefinidamente — o log da máquina
+ * acumulou ~1300 respostas 401 nesse endpoint em 25 dias, todas com o mesmo
+ * resultado.
+ *
+ * A recuperação é automática, e é por isso que isto é um disjuntor e não um
+ * "desliga o Talk": qualquer resposta bem-sucedida rearma. Como o polling para
+ * mas as queries continuam habilitadas, o refetch de foco de janela do TanStack
+ * ainda tenta — então um 401 passageiro se cura sozinho ao voltar para a aba,
+ * sem exigir religar a conta.
+ */
+let authBroken = false;
+const authBrokenListeners = new Set<() => void>();
+
+function setAuthBroken(v: boolean) {
+  if (authBroken === v) return;
+  authBroken = v;
+  authBrokenListeners.forEach((l) => l());
+}
+
+export function isTalkAuthBroken() {
+  return authBroken;
+}
+
+export function subscribeTalkAuthBroken(l: () => void) {
+  authBrokenListeners.add(l);
+  return () => {
+    authBrokenListeners.delete(l);
+  };
+}
+
+/** Rearma o disjuntor — chamado ao (re)vincular ou remover a conta. */
+export function resetTalkAuthBroken() {
+  setAuthBroken(false);
+}
+
 api.interceptors.response.use(
-  (r) => r,
+  (r) => {
+    setAuthBroken(false); // deu certo → rearma
+    return r;
+  },
   (err) => {
     if (err?.response?.status === 401 && getTalkAuth()) {
       const reason = String(err.response?.data?.error || '');
@@ -184,6 +229,7 @@ api.interceptors.response.use(
         // usuário precisa entrar no app de novo.
         redmineSession: /redmine|não autenticado/i.test(reason),
       };
+      setAuthBroken(true);
       window.dispatchEvent(new CustomEvent(TALK_AUTH_EXPIRED_EVENT));
     }
     return Promise.reject(err);
