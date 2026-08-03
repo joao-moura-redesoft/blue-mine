@@ -79,6 +79,30 @@ router.get(
   }),
 );
 
+// Queries das candidatas a @menção: atribuídas a mim, criadas por mim, onde sou
+// dev (141) ou revisor (210).
+//
+// O corte por data vai na QUERY, não em memória. Antes cada um dos 4 conjuntos
+// trazia TODAS as tarefas do usuário (o teto de 2000 do fetchAllIssues = até 20
+// páginas por conjunto, ~80 requisições ao Redmine) só para descartar quase tudo
+// no filtro em memória logo depois. Com o filtro no servidor, cada conjunto
+// costuma caber numa única página.
+//
+// Formato de data do Redmine: `>=YYYY-MM-DD` (mesma convenção de analytics.js e
+// digest.js). A granularidade é de DIA, daí a rede de segurança em memória.
+function mentionCandidateQueries(userId, sinceMs) {
+  const recent = {
+    updated_on: `>=${new Date(sinceMs).toISOString().slice(0, 10)}`,
+    sort: 'updated_on:desc',
+  };
+  return [
+    { ...recent, assigned_to_id: 'me', status_id: '*' },
+    { ...recent, author_id: 'me', status_id: 'open' },
+    { ...recent, [CF_DEVELOPER]: userId, status_id: 'open' },
+    { ...recent, [CF_REVIEWER]: userId, status_id: 'open' },
+  ];
+}
+
 // Detecção de @menção: varre os journals recentes das tarefas em que estou
 // envolvido e devolve as notas que citam meu nome/login.
 router.get(
@@ -90,26 +114,15 @@ router.get(
     const userId = user.id;
     const sinceMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
-    // Conjunto de candidatas: atribuídas a mim, criadas por mim, onde sou dev (141) ou revisor (210).
-    const sets = await Promise.all([
-      fetchAllIssues(redmine, { assigned_to_id: 'me', status_id: '*', sort: 'updated_on:desc' }),
-      fetchAllIssues(redmine, { author_id: 'me', status_id: 'open', sort: 'updated_on:desc' }),
-      fetchAllIssues(redmine, {
-        [CF_DEVELOPER]: userId,
-        status_id: 'open',
-        sort: 'updated_on:desc',
-      }),
-      fetchAllIssues(redmine, {
-        [CF_REVIEWER]: userId,
-        status_id: 'open',
-        sort: 'updated_on:desc',
-      }),
-    ]);
+    const sets = await Promise.all(
+      mentionCandidateQueries(userId, sinceMs).map((params) => fetchAllIssues(redmine, params)),
+    );
     const byId = new Map();
     sets.flat().forEach((i) => {
       if (!byId.has(i.id)) byId.set(i.id, i);
     });
-    // Só vale a pena abrir as que mudaram na última semana.
+    // Rede de segurança: o filtro do Redmine tem granularidade de DIA, então ainda
+    // chegam algumas tarefas do dia do corte que são mais velhas que 7 dias.
     const candidates = [...byId.values()]
       .filter((i) => new Date(i.updated_on).getTime() >= sinceMs)
       .slice(0, 60);
@@ -459,3 +472,4 @@ router.get(
 );
 
 module.exports = router;
+module.exports.__testables = { mentionCandidateQueries };
