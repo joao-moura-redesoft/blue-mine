@@ -91,7 +91,6 @@ import {
   Workflow as WorkflowIcon,
 } from 'lucide-react';
 import { useJitsi } from './components/jitsi/JitsiContext';
-import { CallWindow } from './components/jitsi/CallWindow';
 import { MeetingLiveToasts } from './components/jitsi/MeetingLiveToasts';
 import { DAILY_ROOM } from './utils/jitsiConfig';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
@@ -118,12 +117,20 @@ import type { Issue } from './types/redmine';
  *
  * Ficam ansiosos de propósito: KanbanBoard e IssueListView (rotas quentes),
  * IssueModal (abre em clique de qualquer lugar — chunk aqui viraria hitch
- * visível) e os widgets sempre montados (CallWindow, FocusWidget...).
+ * visível) e os widgets sempre montados (FocusWidget...).
+ *
+ * CallWindow é a exceção entre os widgets sempre montados: ele renderiza null
+ * enquanto não há chamada (CallWindow.tsx:330), mas arrastava o @jitsi/react-sdk
+ * inteiro para o chunk inicial. Agora só baixa quando alguém entra numa chamada
+ * — que já é uma ação com espera de rede, então o chunk não aparece como hitch.
  *
  * lazy() espera export default e todos estes são exports nomeados, daí o
  * .then() de unwrap — inline em vez de um helper genérico porque assim o TS
  * infere as props de cada componente sozinho.
  */
+const CallWindow = lazy(() =>
+  import('./components/jitsi/CallWindow').then((m) => ({ default: m.CallWindow })),
+);
 const Dashboard = lazy(() =>
   import('./components/Dashboard').then((m) => ({ default: m.Dashboard })),
 );
@@ -1460,8 +1467,10 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
       {/* Sessão de foco (Pomodoro) com auto-apontamento */}
       <FocusWidget />
 
-      {/* Janela flutuante de vídeo (Jitsi War Room) */}
-      <CallWindow />
+      {/* Janela flutuante de vídeo (Jitsi War Room) — lazy, ver nota acima */}
+      <Suspense fallback={null}>
+        <CallWindow />
+      </Suspense>
 
       {/* Avisos de reunião ao vivo nas suas tarefas */}
       <MeetingLiveToasts />

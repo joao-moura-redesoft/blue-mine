@@ -1,4 +1,14 @@
-import { useState, useRef, useEffect, useCallback, useMemo, Fragment, lazy, Suspense } from 'react';
+import {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+  memo,
+  Fragment,
+  lazy,
+  Suspense,
+} from 'react';
 import {
   MessageSquare,
   ExternalLink,
@@ -1700,7 +1710,7 @@ function ReminderDialog({
   );
 }
 
-function Bubble({
+function BubbleImpl({
   msg,
   isMe,
   onIssueClick,
@@ -2325,6 +2335,17 @@ function Bubble({
     </div>
   );
 }
+
+/**
+ * memo: uma sala aberta renderiza centenas de bolhas, e o componente pai
+ * re-renderiza a cada tecla digitada, a cada poll de 10s e a cada reação que
+ * chega. Sem isto, tudo isso redesenhava a lista inteira.
+ *
+ * Depende de o pai passar callbacks estáveis (os handleX com useCallback) e de
+ * `readers` vir do cache em readersCache — qualquer prop recriada por render
+ * derruba a comparação rasa e o memo vira só custo.
+ */
+const Bubble = memo(BubbleImpl);
 
 // ─── Indicador de digitação ───────────────────────────────────────────────────
 
@@ -3089,13 +3110,22 @@ function ChatWindow({
   );
   const numActiveParticipants = activeParticipants.length;
 
+  // Cache por mensagem: sem ele cada render devolvia um ARRAY NOVO para cada
+  // bolha, o que sozinho anularia o memo() do Bubble. O cache é descartado
+  // quando activeParticipants muda — que é exatamente quando o resultado muda.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- activeParticipants é a CHAVE de invalidação do cache, não um valor lido na factory
+  const readersCache = useMemo(() => new Map<number, string[]>(), [activeParticipants]);
   const getReadersForMessage = useCallback(
     (msgId: number) => {
-      return activeParticipants
+      const cached = readersCache.get(msgId);
+      if (cached) return cached;
+      const readers = activeParticipants
         .filter((p) => (p.lastReadMessage ?? 0) >= msgId)
         .map((p) => p.displayName.split(' ')[0]);
+      readersCache.set(msgId, readers);
+      return readers;
     },
-    [activeParticipants],
+    [activeParticipants, readersCache],
   );
 
   // Alguns servidores/versões do Talk NÃO expõem `lastReadMessage` dos OUTROS
@@ -3688,6 +3718,60 @@ function ChatWindow({
     [orderedSelected, formatSelected, room.displayName, preparingTask],
   );
 
+  // ── Handlers do Bubble ──────────────────────────────────────────────────
+  // O Bubble é memo(): estes precisam ser estáveis. Eram arrows inline no JSX,
+  // o que recriava a função a cada render e redesenhava TODAS as mensagens da
+  // sala a cada tecla digitada / tick de polling / reação recebida.
+  const handleReply = useCallback((msg: TalkMessage) => {
+    setReplyTo(msg);
+    setEditTarget(null);
+  }, []);
+
+  const handleEdit = useCallback((msg: TalkMessage) => {
+    setEditTarget(msg);
+    setReplyTo(null);
+  }, []);
+
+  const handleDelete = useCallback(
+    (msg: TalkMessage) => {
+      deleteMsg.mutate(msg.id);
+      // A exclusão otimista atua na query viva; se a mensagem veio do
+      // histórico paginado, remove-a daqui também para sumir na hora.
+      setOlderMessages((prev) => prev.filter((m) => m.id !== msg.id));
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- só .mutate é estável; o objeto do useMutation é novo a cada render e derrubaria o memo() do Bubble (idem nos dois abaixo)
+    [deleteMsg.mutate],
+  );
+
+  const handleDeleteAttachment = useCallback(
+    (msg: TalkMessage, path: string) => {
+      deleteAttachment.mutate({ messageId: msg.id, path });
+      setOlderMessages((prev) =>
+        prev.map((m) => (m.id === msg.id ? { ...m, _attachmentRemoved: true } : m)),
+      );
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ver nota em handleDelete
+    [deleteAttachment.mutate],
+  );
+
+  const handleReact = useCallback(
+    (msgId: number, emoji: string, remove: boolean) =>
+      react.mutate({ messageId: msgId, reaction: emoji, remove }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ver nota em handleDelete
+    [react.mutate],
+  );
+
+  const handleForward = useCallback((msg: TalkMessage) => setForwardMsgs([msg]), []);
+  const handleCreateTask = useCallback(
+    (msg: TalkMessage) => openTaskFrom([msg.id]),
+    [openTaskFrom],
+  );
+  const handleAttachToIssue = useCallback((msg: TalkMessage) => setAttachMsgs([msg]), []);
+  const handleAvatarClick = useCallback(
+    (actorId: string, displayName: string) => setProfileUser({ actorId, displayName }),
+    [],
+  );
+
   const createTaskFromSelection = useCallback(async () => {
     await openTaskFrom([...selectedIds]);
     exitSelection();
@@ -4091,43 +4175,25 @@ function ChatWindow({
                   isDM={isDM}
                   onIssueClick={onIssueClick}
                   onJumpTo={jumpToMessage}
-                  onReply={(msg) => {
-                    setReplyTo(msg);
-                    setEditTarget(null);
-                  }}
-                  onEdit={(msg) => {
-                    setEditTarget(msg);
-                    setReplyTo(null);
-                  }}
-                  onDelete={(msg) => {
-                    deleteMsg.mutate(msg.id);
-                    // A exclusão otimista atua na query viva; se a mensagem veio do
-                    // histórico paginado, remove-a daqui também para sumir na hora.
-                    setOlderMessages((prev) => prev.filter((m) => m.id !== msg.id));
-                  }}
-                  onDeleteAttachment={(msg, path) => {
-                    deleteAttachment.mutate({ messageId: msg.id, path });
-                    setOlderMessages((prev) =>
-                      prev.map((m) => (m.id === msg.id ? { ...m, _attachmentRemoved: true } : m)),
-                    );
-                  }}
-                  onReact={(msgId, emoji, remove) =>
-                    react.mutate({ messageId: msgId, reaction: emoji, remove })
-                  }
+                  onReply={handleReply}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                  onDeleteAttachment={handleDeleteAttachment}
+                  onReact={handleReact}
                   onRetry={retrySend}
                   onCopy={copyMessage}
-                  onForward={(msg) => setForwardMsgs([msg])}
+                  onForward={handleForward}
                   onReplyPrivately={replyPrivately}
                   onTogglePin={togglePin}
                   pinned={pinned?.id === m.id}
-                  onCreateTask={(msg) => openTaskFrom([msg.id])}
-                  onAttachToIssue={(msg) => setAttachMsgs([msg])}
+                  onCreateTask={handleCreateTask}
+                  onAttachToIssue={handleAttachToIssue}
                   onSaveMessage={toggleSaveMessage}
                   saved={savedIds.has(m.id)}
                   onScheduleReminder={setReminderMsg}
                   onStartSelect={startSelection}
                   onToggleSelect={toggleSelect}
-                  onAvatarClick={(actorId, displayName) => setProfileUser({ actorId, displayName })}
+                  onAvatarClick={handleAvatarClick}
                   onShowInfo={setInfoMsg}
                   mentionsMe={messageMentionsMe(m, myId)}
                   readers={getReadersForMessage(m.id)}

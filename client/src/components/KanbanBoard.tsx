@@ -730,7 +730,10 @@ function KanbanColumn({
               onSubtaskOpen={onSubtaskOpen}
               onSubtaskDone={onSubtaskDone}
               activeTimerIssueId={activeTimerIssueId}
-              timerFormatted={timerFormatted}
+              // Só o card do timer ativo recebe o cronômetro. Passar para todos
+              // fazia a coluna inteira re-renderizar a cada segundo — e o card só
+              // usa esse valor quando é ele o dono do timer (IssueCard.tsx:482).
+              timerFormatted={activeTimerIssueId === issue.id ? timerFormatted : undefined}
               onTimerStart={onTimerStart}
               onTimerStop={onTimerStop}
             />
@@ -1201,12 +1204,28 @@ export function KanbanBoard({
     });
   }, []);
 
-  const handleQuickStatusChange = (issueId: number, statusId: number) => {
-    const issue = issues?.find((i) => i.id === issueId);
-    if (!issue) return;
-    if (issue.status.id === statusId) return;
-    updateStatus.mutate({ id: issueId, statusId });
-  };
+  // Os quatro abaixo são estáveis de propósito: descem até o IssueCard, que é
+  // memo() — um callback recriado a cada render anularia a memoização de todos
+  // os cards do board.
+  const handleQuickStatusChange = useCallback(
+    (issueId: number, statusId: number) => {
+      const issue = issues?.find((i) => i.id === issueId);
+      if (!issue) return;
+      if (issue.status.id === statusId) return;
+      updateStatus.mutate({ id: issueId, statusId });
+    },
+    // .mutate (e não `updateStatus`) porque o objeto do useMutation é recriado a
+    // cada render; a função .mutate é estável. Mesma razão para timer.stop abaixo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- depender de `updateStatus` recriaria este callback todo render e anularia o memo() do IssueCard
+    [issues, updateStatus.mutate],
+  );
+
+  const handleCardClick = useCallback((issue: Issue) => onIssueClick(issue.id), [onIssueClick]);
+  const timerStop = timer.stop;
+  const handleTimerStop = useCallback(() => {
+    timerStop();
+  }, [timerStop]);
+  const statusesForCards = useMemo(() => allStatuses ?? [], [allStatuses]);
 
   const handleDragStart = ({ active }: DragStartEvent) => {
     if (String(active.id).startsWith('issue-')) {
@@ -1753,8 +1772,8 @@ export function KanbanBoard({
                         status={status}
                         issues={lane.byStatus.get(status.id) ?? []}
                         archivedIssues={[]}
-                        onIssueClick={(issue) => onIssueClick(issue.id)}
-                        statuses={allStatuses ?? []}
+                        onIssueClick={handleCardClick}
+                        statuses={statusesForCards}
                         onQuickStatusChange={handleQuickStatusChange}
                         onArchive={archiveIssue}
                         onUnarchive={unarchiveIssue}
@@ -1768,7 +1787,7 @@ export function KanbanBoard({
                         activeTimerIssueId={timer.activeIssueId}
                         timerFormatted={timer.formatted}
                         onTimerStart={timer.start}
-                        onTimerStop={() => timer.stop()}
+                        onTimerStop={handleTimerStop}
                         customColorKey={columnColors[status.id]}
                       />
                     ))}
@@ -1793,8 +1812,8 @@ export function KanbanBoard({
                   status={status}
                   issues={issuesByStatus.get(status.id) ?? []}
                   archivedIssues={archivedByStatus.get(status.id) ?? []}
-                  onIssueClick={(issue) => onIssueClick(issue.id)}
-                  statuses={allStatuses ?? []}
+                  onIssueClick={handleCardClick}
+                  statuses={statusesForCards}
                   onQuickStatusChange={handleQuickStatusChange}
                   onArchive={archiveIssue}
                   onUnarchive={unarchiveIssue}
@@ -1810,7 +1829,7 @@ export function KanbanBoard({
                   activeTimerIssueId={timer.activeIssueId}
                   timerFormatted={timer.formatted}
                   onTimerStart={timer.start}
-                  onTimerStop={() => timer.stop()}
+                  onTimerStop={handleTimerStop}
                   customColorKey={columnColors[status.id]}
                   onColorChange={handleColorChange}
                   wipLimit={wipLimits[status.id]}

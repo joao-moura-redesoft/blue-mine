@@ -1,4 +1,4 @@
-import { useState, useRef, useLayoutEffect } from 'react';
+import { useState, useRef, useLayoutEffect, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
@@ -441,7 +441,7 @@ interface Props {
   onTimerStop?: () => void;
 }
 
-export function IssueCard({
+function IssueCardImpl({
   issue,
   onClick,
   isDragOverlay = false,
@@ -797,3 +797,13 @@ export function IssueCard({
     </div>
   );
 }
+
+/**
+ * memo: uma coluna do Kanban chega a dezenas de cards e QUALQUER mudança de
+ * estado no board (tick do timer, hover, seleção, refetch do react-query)
+ * redesenhava todos eles. O card só depende da issue e de flags escalares, então
+ * a comparação rasa padrão do memo já basta — mas ela só funciona se o board
+ * passar callbacks estáveis (ver os useCallback em KanbanBoard.tsx) e não mandar
+ * `timerFormatted` para cards que não são o do timer ativo.
+ */
+export const IssueCard = memo(IssueCardImpl);

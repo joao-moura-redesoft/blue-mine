@@ -52,6 +52,14 @@ function assetBuffer(key) {
   return buf;
 }
 
+// Só o que o Vite versiona por hash no nome (/assets/index-CjVOvynn.js) pode ser
+// `immutable` — o nome muda a cada build, então cachear por um ano é seguro.
+// Todo o resto tem nome FIXO entre builds: /index.html, /sw.js, /registerSW.js,
+// /manifest.webmanifest e os ícones de `includeAssets`. Marcar esses como
+// immutable congelava o app na versão instalada: o navegador nunca reberia o
+// registerSW.js novo, então o autoUpdate do service worker não disparava.
+const isHashedAsset = (key) => key.startsWith('/assets/');
+
 // Registra o serviço da SPA no app (estáticos + fallback para index.html).
 // `diskDir` é usado apenas no modo em disco (dev/pkg).
 function mountSpa(app, diskDir) {
@@ -60,7 +68,10 @@ function mountSpa(app, diskDir) {
       const buf = assetBuffer(key);
       if (!buf) return false;
       res.set('Content-Type', contentType(key));
-      if (key !== '/index.html') res.set('Cache-Control', 'public, max-age=31536000, immutable');
+      res.set(
+        'Cache-Control',
+        isHashedAsset(key) ? 'public, max-age=31536000, immutable' : 'no-cache',
+      );
       res.send(buf);
       return true;
     };

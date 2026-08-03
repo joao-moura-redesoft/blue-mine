@@ -35,11 +35,17 @@ function loadCaList() {
   return caList;
 }
 
+// keepAlive: sem isso cada request a Redmine/Talk/Zimbra paga um handshake TLS
+// completo. Aqui a rede corporativa intercepta o TLS, então o handshake é ainda
+// mais caro que o normal — reusar a conexão é o maior ganho por linha do server.
+// maxSockets segura o paralelismo do mapLimit/Promise.all sem virar enxurrada.
+const KEEP_ALIVE_OPTS = { keepAlive: true, keepAliveMsecs: 15_000, maxSockets: 32 };
+
 let agent; // undefined = ainda não construiu
 function getInternalCaAgent() {
   if (agent !== undefined) return agent;
   const list = loadCaList();
-  agent = list ? new https.Agent({ ca: list }) : null;
+  agent = list ? new https.Agent({ ...KEEP_ALIVE_OPTS, ca: list }) : null;
   return agent;
 }
 
