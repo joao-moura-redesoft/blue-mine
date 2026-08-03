@@ -23,6 +23,14 @@ const isPackaged = isSea || isPkg;
 
 // Pasta gravável para dados de runtime (cofre, sessões, logs, push...).
 // Empacotado: ao lado do executável. Dev: a pasta server/ (this file: server/lib).
-const DATA_DIR = isPackaged ? path.dirname(process.execPath) : path.join(__dirname, '..');
+//
+// BLUEMINE_DATA_DIR tem prioridade e existe para testes de integração: sem ele,
+// uma segunda instância do servidor grava sessões e inscrições de push por cima
+// das do app real — e uma inscrição de teste faria o app de verdade pollar um
+// Redmine que não existe. Mesma motivação de BLUEMINE_VAULT_KEY em secureStore.js.
+// Não use em produção: apontar para outra pasta órfã os dados já cifrados.
+const DATA_DIR =
+  process.env.BLUEMINE_DATA_DIR ||
+  (isPackaged ? path.dirname(process.execPath) : path.join(__dirname, '..'));
 
 module.exports = { isSea, isPkg, isPackaged, DATA_DIR };

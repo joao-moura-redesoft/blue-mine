@@ -245,7 +245,9 @@ const PUSH_TITLE = {
   monitored: '👁️ Nova tarefa em monitoramento',
 };
 
-const PUSH_POLL_MS = 60 * 1000;
+// Configurável para teste de integração (o ciclo padrão de 60s tornaria cada
+// verificação de ponta a ponta insuportavelmente lenta) e para depurar o polling.
+const PUSH_POLL_MS = Number(process.env.PUSH_POLL_MS) || 60 * 1000;
 let pushPolling = false;
 async function pollPush() {
   if (pushPolling) return;
