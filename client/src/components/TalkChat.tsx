@@ -2,6 +2,7 @@ import {
   useState,
   useRef,
   useEffect,
+  useLayoutEffect,
   useCallback,
   useMemo,
   memo,
@@ -3187,6 +3188,14 @@ function ChatWindow({
   const [size, setSize] = useState({ w: 300, h: 420 });
   const sizeRef = useRef(size);
 
+  // Janela de renderização (ver o bloco que calcula windowedMessages). Declarada
+  // aqui em cima porque `jumpToMessage`, definido antes daquele bloco, precisa
+  // expandir a janela para achar uma mensagem que está carregada mas não
+  // renderizada. Pelo mesmo motivo a lista vai num ref.
+  const WINDOW_STEP = 60;
+  const [windowSize, setWindowSize] = useState(WINDOW_STEP);
+  const visibleMessagesRef = useRef<TalkMessage[]>([]);
+
   // Load more (mensagens mais antigas)
   const [olderMessages, setOlderMessages] = useState<TalkMessage[]>([]);
   // Se a carga inicial retornou < 50, não há mais mensagens para buscar
@@ -3234,6 +3243,21 @@ function ChatWindow({
   // busca o contexto histórico (50 msgs até ela) e então rola.
   const jumpToMessage = useCallback(
     async (id: number) => {
+      // A mensagem pode já estar carregada mas fora da janela de renderização.
+      // Sem isto o getElementById falharia e iríamos buscar no servidor um
+      // contexto que já temos em memória.
+      const idx = visibleMessagesRef.current.findIndex((m) => m.id === id);
+      if (idx >= 0) {
+        const precisa = visibleMessagesRef.current.length - idx + 10; // +10 de folga acima
+        let expandiu = false;
+        setWindowSize((n) => {
+          if (n >= precisa) return n;
+          expandiu = true;
+          return precisa;
+        });
+        if (expandiu) await new Promise((r) => setTimeout(r, 0)); // deixa o React pintar
+      }
+
       let el = document.getElementById(`talk-msg-${id}`);
       if (!el) {
         setJumpingTo(id);
@@ -3430,6 +3454,47 @@ function ChatWindow({
       return m.messageType === 'comment' && (!m.systemMessage || hasFile);
     });
   }, [allMessages]);
+
+  // ── Janela de renderização ────────────────────────────────────────────────
+  // Uma sala movimentada acumula centenas de mensagens no DOM, cada uma com
+  // avatar, reações, anexos e menu de ações. O memo() do Bubble corta os
+  // re-renders, mas não o custo de MONTAR tudo isso.
+  //
+  // Renderizamos só a cauda (as mais recentes) e revelamos mais conforme o
+  // usuário sobe. Janela pela cauda, e não virtualização por altura: o chat tem
+  // altura variável por mensagem, e `jumpToMessage` procura o elemento por
+  // getElementById — uma lista virtual quebraria os dois. Mesmo padrão do
+  // DriveView. (windowSize/WINDOW_STEP são declarados no topo do componente.)
+  useEffect(() => {
+    visibleMessagesRef.current = visibleMessages;
+  }, [visibleMessages]);
+
+  // Sala nova recomeça pela cauda.
+  useEffect(() => setWindowSize(WINDOW_STEP), [room.token]);
+
+  const unreadIdx = firstUnreadId ? visibleMessages.findIndex((m) => m.id === firstUnreadId) : -1;
+  const windowStart = talkWindowStart(visibleMessages.length, windowSize, unreadIdx);
+  const windowedMessages = useMemo(
+    () => visibleMessages.slice(windowStart),
+    [visibleMessages, windowStart],
+  );
+  const hiddenOlderCount = windowStart;
+
+  // Revela mais um lote mantendo o conteúdo sob o olho do usuário: sem isto a
+  // lista cresce para cima e o scroll "pula".
+  const anchorRef = useRef<number | null>(null);
+  const revealOlder = useCallback(() => {
+    const el = scrollRef.current;
+    anchorRef.current = el ? el.scrollHeight - el.scrollTop : null;
+    setWindowSize((n) => n + WINDOW_STEP);
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (anchorRef.current == null || !el) return;
+    el.scrollTop = el.scrollHeight - anchorRef.current;
+    anchorRef.current = null;
+  }, [windowedMessages]);
 
   // Contexto para sugestões de resposta (IA): últimas ~10 mensagens de texto.
   const suggestContext = useMemo(
@@ -4113,11 +4178,28 @@ function ChatWindow({
           if (!el) return;
           const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
           if (dist < 50) setUnreadWhileScrolled(0);
+          // Chegando perto do topo, revela o lote anterior antes que o usuário
+          // bata na borda — a revelação é local (já temos as mensagens).
+          if (el.scrollTop < 300 && hiddenOlderCount > 0) revealOlder();
         }}
       >
         <div ref={contentRef}>
-          {/* Carregar mais */}
-          {hasMore && (
+          {/* Revelar o que já está em memória mas fora da janela. Fica antes do
+              "Carregar mais" porque é instantâneo — não vai à rede. */}
+          {hiddenOlderCount > 0 && (
+            <div className="flex justify-center mb-3">
+              <button
+                onClick={revealOlder}
+                className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full px-3 py-1 transition-colors"
+              >
+                <ChevronUp size={12} />
+                Mostrar anteriores ({hiddenOlderCount})
+              </button>
+            </div>
+          )}
+
+          {/* Carregar mais (rede) — só quando tudo que temos já está na tela */}
+          {hasMore && hiddenOlderCount === 0 && (
             <div className="flex justify-center mb-3">
               <button
                 onClick={loadMore}
@@ -4140,8 +4222,13 @@ function ChatWindow({
               Nenhuma mensagem ainda
             </div>
           )}
-          {visibleMessages.map((m, idx) => {
+          {windowedMessages.map((m, wIdx) => {
             const isMe = m.actorId === myId;
+            // prev/next saem da lista COMPLETA, não da janela: na borda superior
+            // o vizinho anterior existe mas não está renderizado, e usar a janela
+            // faria a primeira mensagem perder o agrupamento (repetiria autor e
+            // divisor de data a cada revelação).
+            const idx = windowStart + wIdx;
             const prev = visibleMessages[idx - 1];
             const next = visibleMessages[idx + 1];
             const divider = dividerLabel(prev, m);
@@ -5653,6 +5740,31 @@ function ConversationsPanel({
       </div>
     </>
   );
+}
+
+/**
+ * Índice onde começa a janela de mensagens renderizadas.
+ *
+ * Renderizamos só a cauda da conversa: uma sala movimentada acumula centenas de
+ * bolhas (avatar, reações, anexos, menu de ações) e montar todas custa caro. O
+ * memo() do Bubble corta os re-renders, não a montagem.
+ *
+ * Escolhemos janela pela cauda em vez de virtualização por altura porque as
+ * mensagens têm altura variável e `jumpToMessage` localiza o elemento por
+ * getElementById — uma lista virtual quebraria os dois. Mesmo padrão do
+ * DriveView.
+ *
+ * `unreadIdx` (-1 quando não há) força a janela a alcançar o divisor de
+ * não-lidas: com muitas mensagens sem ler, o marcador cairia fora da cauda e o
+ * usuário nunca o veria. Nunca ENCOLHE a janela — se o usuário já revelou mais
+ * que isso, o que está aberto continua aberto.
+ *
+ * Exportada para teste (ver TalkChat.window.test.tsx): é a regra que decide o
+ * tamanho do DOM da conversa.
+ */
+export function talkWindowStart(total: number, windowSize: number, unreadIdx = -1): number {
+  const minWindow = unreadIdx >= 0 ? Math.max(windowSize, total - unreadIdx + 5) : windowSize;
+  return Math.max(0, total - minWindow);
 }
 
 // ─── Widget principal ─────────────────────────────────────────────────────────
