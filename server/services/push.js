@@ -298,8 +298,19 @@ async function subscribe(req) {
 
 function unsubscribe(req) {
   const endpoint = req.body?.endpoint;
-  subscriptions = subscriptions.filter((s) => s.endpoint !== endpoint);
+  // No lugar (splice), não por reatribuição: isto vem de uma requisição HTTP e
+  // pode coincidir com um tick de polling em andamento, que segura referências
+  // ao array. Ver o comentário em sendPush.
+  removeSubscriptionByEndpoint(endpoint);
   saveSubs();
+}
+
+// Remove uma inscrição MUTANDO o array, para que todo mundo que já tem a
+// referência (workers do pool, ticks em andamento) enxergue a remoção.
+function removeSubscriptionByEndpoint(endpoint) {
+  const i = subscriptions.findIndex((s) => s.endpoint === endpoint);
+  if (i !== -1) subscriptions.splice(i, 1);
+  return i !== -1;
 }
 
 // Envia uma notificação; remove a inscrição se o navegador disser que expirou (404/410).
@@ -312,9 +323,14 @@ async function sendPush(rec, payload) {
     return true;
   } catch (err) {
     if (err.statusCode === 404 || err.statusCode === 410) {
-      subscriptions = subscriptions.filter((s) => s.endpoint !== rec.endpoint);
-      saveSubs();
-      console.log('[push] inscrição expirada removida');
+      // Remoção no lugar, não `subscriptions = filter(...)`: o polling roda em
+      // pool de concorrência (PUSH_POLL_CONCURRENCY) e dois sendPush podem cair
+      // aqui ao mesmo tempo. Com reatribuição, o segundo parte de uma cópia sem
+      // a remoção do primeiro e ressuscita uma inscrição já morta.
+      if (removeSubscriptionByEndpoint(rec.endpoint)) {
+        saveSubs();
+        console.log('[push] inscrição expirada removida');
+      }
     } else {
       console.error('[push] erro ao enviar:', err.statusCode || err.message);
     }
@@ -345,13 +361,30 @@ const PUSH_TITLE = {
 // Configurável para teste de integração (o ciclo padrão de 60s tornaria cada
 // verificação de ponta a ponta insuportavelmente lenta) e para depurar o polling.
 const PUSH_POLL_MS = Number(process.env.PUSH_POLL_MS) || 60 * 1000;
+
+// Quantas inscrições varrer ao mesmo tempo. O laço era sequencial (`await`
+// dentro do `for`): cada usuário só começava quando o anterior terminava, e a
+// duração do tick crescia linearmente com o número de pessoas. Passando do
+// intervalo, o `if (pushPolling) return` descarta o tick seguinte SEM log — a
+// notificação atrasa e nada registra o porquê.
+//
+// Menor que a concorrência do Talk (6): lá cada item é um request barato de
+// listagem; aqui cada item é uma varredura paginada (1 + 4 buscas, até ~80
+// requests). Alto demais e trocamos o tick lento por rajada no Redmine.
+const PUSH_POLL_CONCURRENCY = Number(process.env.PUSH_POLL_CONCURRENCY) || 4;
+
 let pushPolling = false;
 async function pollPush() {
   if (pushPolling) return;
-  // Poda inscrições inativas há mais de 30 dias (TTL).
+  // Poda inscrições inativas há mais de 30 dias (TTL). Também no lugar: o
+  // `unsubscribe` e o `sendPush` mutam este mesmo array, e trocar a referência
+  // aqui faria a remoção deles cair no array antigo (ver sendPush).
   const now = Date.now();
   const before = subscriptions.length;
-  subscriptions = subscriptions.filter((s) => now - (s.updatedAt || now) < SUB_TTL_MS);
+  for (let i = subscriptions.length - 1; i >= 0; i--) {
+    const s = subscriptions[i];
+    if (now - (s.updatedAt || now) >= SUB_TTL_MS) subscriptions.splice(i, 1);
+  }
   if (subscriptions.length !== before) {
     console.log(`[push] ${before - subscriptions.length} inscrição(ões) expiradas por inatividade`);
     // Em loop de polling: não deixa erro de criptografia virar unhandledRejection.
@@ -364,59 +397,65 @@ async function pollPush() {
   if (subscriptions.length === 0) return;
   pushPolling = true;
   try {
-    for (const rec of [...subscriptions]) {
-      try {
-        const { issues, seen, me, fingerprint } = await collectPushState(
-          rec.url,
-          rec.key || '',
-          rec.username || '',
-          rec.password || '',
-        );
-
-        // Avisa a janela aberta que algo mudou, para ela rebuscar sob demanda em
-        // vez de varrer o Redmine por conta própria a cada 60-90s. Vai fora do
-        // laço de notificação porque cobre TAMBÉM edição de tarefa existente,
-        // que o diff de IDs abaixo não enxerga.
-        if (rec.fingerprint && rec.fingerprint !== fingerprint) {
-          issueEvents.emit(issueEvents.makeKey(rec.url, me), { reason: 'poll' });
-        }
-        rec.fingerprint = fingerprint;
-
-        const prev = rec.seen || { assigned: [], review: [], monitored: [] };
-        const toNotify = [];
-
-        for (const type of ['assigned', 'review', 'monitored']) {
-          const oldSet = new Set(prev[type] || []);
-          for (const id of seen[type]) {
-            if (!oldSet.has(id) && issues.has(id)) toNotify.push({ type, issue: issues.get(id) });
-          }
-        }
-        rec.seen = seen;
-
-        for (const { type, issue } of toNotify) {
-          await sendPush(rec, {
-            title: PUSH_TITLE[type],
-            body: `#${issue.id} — ${issue.subject}\n${issue.project?.name ?? ''}`,
-            tag: `rk-${PUSH_TAG[type]}-${issue.id}`,
-            url: `/?issue=${issue.id}`,
-            issueId: issue.id,
-          });
-          keyboard.notify({
-            type: KB_ISSUE[type].type,
-            title: issue.subject,
-            subtitle: `#${issue.id} • ${issue.project?.name ?? ''}`,
-            tag: KB_ISSUE[type].tag,
-          });
-        }
-        // Talk é tratado num loop próprio e mais rápido (pollTalkPush) — não aqui,
-        // para não ficar atrás da paginação pesada do Redmine.
-      } catch (err) {
-        console.warn('[push] poll falhou para uma inscrição:', err.response?.status || err.message);
-      }
-    }
+    await mapPool([...subscriptions], PUSH_POLL_CONCURRENCY, pollOneSubscription);
     saveSubs(); // persiste os "seen" atualizados
   } finally {
     pushPolling = false;
+  }
+}
+
+// Uma inscrição: varre, avisa a janela aberta e notifica o que entrou.
+// Extraída do laço para rodar no pool de concorrência. Continua engolindo o
+// próprio erro: uma inscrição com credencial vencida não pode derrubar o tick
+// das outras (o mapPool propaga exceção e abortaria o pool inteiro).
+async function pollOneSubscription(rec) {
+  try {
+    const { issues, seen, me, fingerprint } = await collectPushState(
+      rec.url,
+      rec.key || '',
+      rec.username || '',
+      rec.password || '',
+    );
+
+    // Avisa a janela aberta que algo mudou, para ela rebuscar sob demanda em
+    // vez de varrer o Redmine por conta própria a cada 60-90s. Vai fora do
+    // laço de notificação porque cobre TAMBÉM edição de tarefa existente,
+    // que o diff de IDs abaixo não enxerga.
+    if (rec.fingerprint && rec.fingerprint !== fingerprint) {
+      issueEvents.emit(issueEvents.makeKey(rec.url, me), { reason: 'poll' });
+    }
+    rec.fingerprint = fingerprint;
+
+    const prev = rec.seen || { assigned: [], review: [], monitored: [] };
+    const toNotify = [];
+
+    for (const type of ['assigned', 'review', 'monitored']) {
+      const oldSet = new Set(prev[type] || []);
+      for (const id of seen[type]) {
+        if (!oldSet.has(id) && issues.has(id)) toNotify.push({ type, issue: issues.get(id) });
+      }
+    }
+    rec.seen = seen;
+
+    for (const { type, issue } of toNotify) {
+      await sendPush(rec, {
+        title: PUSH_TITLE[type],
+        body: `#${issue.id} — ${issue.subject}\n${issue.project?.name ?? ''}`,
+        tag: `rk-${PUSH_TAG[type]}-${issue.id}`,
+        url: `/?issue=${issue.id}`,
+        issueId: issue.id,
+      });
+      keyboard.notify({
+        type: KB_ISSUE[type].type,
+        title: issue.subject,
+        subtitle: `#${issue.id} • ${issue.project?.name ?? ''}`,
+        tag: KB_ISSUE[type].tag,
+      });
+    }
+    // Talk é tratado num loop próprio e mais rápido (pollTalkPush) — não aqui,
+    // para não ficar atrás da paginação pesada do Redmine.
+  } catch (err) {
+    console.warn('[push] poll falhou para uma inscrição:', err.response?.status || err.message);
   }
 }
 
@@ -711,5 +750,14 @@ module.exports = {
   sendPush,
   collectPushState,
   getSubscriptions,
-  __testables: { fingerprintOf, collectKeyOf, copyState, dedupedCollect, COLLECT_TTL_MS },
+  __testables: {
+    fingerprintOf,
+    collectKeyOf,
+    copyState,
+    dedupedCollect,
+    COLLECT_TTL_MS,
+    mapPool,
+    PUSH_POLL_CONCURRENCY,
+    removeSubscriptionByEndpoint,
+  },
 };
