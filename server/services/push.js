@@ -64,7 +64,8 @@ const saveSubs = () => writeJsonSecure(SUBS_FILE, subscriptions, { requireEncryp
 const SUB_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 // Coleta os IDs atuais relevantes para um par url/credenciais (inicializa/atualiza "seen").
-async function collectPushState(url, key, username, password) {
+// NÃO chame direto: use `collectPushState`, que deduplica (ver abaixo o porquê).
+async function collectPushStateUncached(url, key, username, password) {
   const client = axios.create({
     baseURL: url,
     headers: { ...buildAuthHeaders(key, username, password), 'Content-Type': 'application/json' },
@@ -111,6 +112,101 @@ async function collectPushState(url, key, username, password) {
     },
   };
 }
+
+// ── Deduplicação da varredura ───────────────────────────────────────────────
+//
+// `collectPushStateUncached` custa 1 + 4 buscas PAGINADAS no Redmine (5 a ~80
+// requests, conforme o volume de tarefas). E ela era chamada de três lugares
+// independentes, todos por usuário e todos no mesmo tick de 60s:
+//
+//   1. pollPush                      (aqui)                    — sempre
+//   2. workflowEngine.tickUser       (gatilhos de issue)       — se há automação
+//   3. workflowEngine, issue.scan    (varredura agendada)      — por workflow
+//
+// Ou seja: o MESMO usuário varria o Redmine inteiro até três vezes por minuto
+// para responder à mesma pergunta. Com n usuários isso é O(3n) de varreduras
+// paginadas, em laço sequencial — o tick passa a não fechar dentro do intervalo
+// e os seguintes são descartados pelo lock, atrasando notificação sem log.
+//
+// O cache é curto de propósito: TTL menor que o tick (60s) para que cada ciclo
+// continue vendo dados frescos — ele só une as chamadas DE UM MESMO ciclo, não
+// atravessa ciclos. Aumentar isto para perto ou acima do tick faria o polling
+// perder uma rodada e atrasar notificações; não é um cache de desempenho geral.
+const COLLECT_TTL_MS = Number(process.env.PUSH_COLLECT_TTL_MS) || 50 * 1000;
+const collectCache = new Map(); // credKey -> { at, promise }
+
+// Chave por credencial, não por usuário: é a credencial que determina o que o
+// Redmine devolve. Inclui a senha porque, após troca no AD, a mesma conta passa
+// a ver as coisas por outra credencial — e reaproveitar a entrada antiga
+// esconderia o 401 que o credentialGuard precisa ver.
+//
+// Os campos vão com o COMPRIMENTO na frente em vez de um separador literal: uma
+// senha pode conter qualquer caractere, e com separador simples ('a|b','c') e
+// ('a','b|c') dariam a mesma chave — duas credenciais distintas compartilhando
+// a varredura de uma só.
+const collectKeyOf = (url, key, username, password) =>
+  [url, key || '', username || '', password || ''].map((p) => `${p.length}:${p}`).join('');
+
+// Cópia rasa por consumidor. `pollPush` guarda `rec.seen = seen` e o snapshot do
+// workflowEngine é diffado contra o estado dele; devolver o MESMO objeto aos
+// três acoplaria consumidores que hoje são independentes — um passaria a
+// enxergar o array que o outro guardou. O Map de issues é compartilhado de
+// propósito (só leitura, e é o volume dos dados).
+function copyState(s) {
+  return {
+    issues: s.issues,
+    me: s.me,
+    fingerprint: s.fingerprint,
+    seen: {
+      assigned: [...s.seen.assigned],
+      review: [...s.seen.review],
+      monitored: [...s.seen.monitored],
+      authored: [...s.seen.authored],
+    },
+  };
+}
+
+// A dedupe em si, separada de QUEM varre: `scan` é injetável para que o teste
+// exercite esta lógica (que é o ponto da mudança) sem precisar simular a rede.
+async function dedupedCollect(cache, ttlMs, scan, url, key, username, password) {
+  const ck = collectKeyOf(url, key, username, password);
+  const hit = cache.get(ck);
+  // Cacheia a PROMESSA, não o resultado: as três chamadas do mesmo tick saem
+  // quase juntas, antes de qualquer uma responder. Guardando só o resultado,
+  // todas errariam o cache e as três varreduras aconteceriam assim mesmo.
+  if (hit && Date.now() - hit.at < ttlMs) return copyState(await hit.promise);
+
+  const promise = scan(url, key, username, password);
+  cache.set(ck, { at: Date.now(), promise });
+  try {
+    return copyState(await promise);
+  } catch (e) {
+    // Falha não fica cacheada: senão um 401/timeout isolado calaria a varredura
+    // desse usuário por todo o TTL. Só apaga se a entrada ainda é esta (outro
+    // tick pode já ter posto uma nova).
+    if (cache.get(ck)?.promise === promise) cache.delete(ck);
+    throw e;
+  }
+}
+
+function collectPushState(url, key, username, password) {
+  return dedupedCollect(
+    collectCache,
+    COLLECT_TTL_MS,
+    collectPushStateUncached,
+    url,
+    key,
+    username,
+    password,
+  );
+}
+
+// Poda periódica: sem isto o Map cresce com toda credencial já vista (troca de
+// senha, usuário que saiu), segurando snapshots de issues na memória.
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of collectCache) if (now - v.at >= COLLECT_TTL_MS) collectCache.delete(k);
+}, COLLECT_TTL_MS).unref();
 
 // Digest curto e estável de id+updated_on de todas as tarefas da varredura.
 function fingerprintOf(byId) {
@@ -615,5 +711,5 @@ module.exports = {
   sendPush,
   collectPushState,
   getSubscriptions,
-  __testables: { fingerprintOf },
+  __testables: { fingerprintOf, collectKeyOf, copyState, dedupedCollect, COLLECT_TTL_MS },
 };
