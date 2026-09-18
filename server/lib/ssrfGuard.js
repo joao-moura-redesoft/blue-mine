@@ -79,13 +79,25 @@ function safeLookup(hostname, options, callback) {
   });
 }
 
-const safeHttpAgent = new http.Agent({ lookup: safeLookup });
+// keepAlive: sem isso, CADA chamada do Talk (poll de salas a cada 15s, poll de
+// mensagens a cada 30s, e principalmente o long-poll do SSE repetindo a cada
+// ~30s por sala aberta — o caminho que devia entregar mensagem em tempo real)
+// paga um handshake TLS inteiro do zero. Nesta rede o TLS é interceptado (ver
+// internalCa.js), o que já torna o handshake mais caro, e proxies de inspeção
+// costumam limitar/atrasar RAJADAS de conexão nova enquanto uma já aberta passa
+// direto — é o padrão exato do sintoma "mensagem demora minutos, aí chega tudo
+// de uma vez". getInternalCaAgent() (Redmine/Zimbra/DokuWiki) já usa keepAlive
+// por este mesmo motivo; aqui faltava.
+const KEEP_ALIVE_OPTS = { keepAlive: true, keepAliveMsecs: 15_000, maxSockets: 32 };
+
+const safeHttpAgent = new http.Agent({ lookup: safeLookup, ...KEEP_ALIVE_OPTS });
 // CA interna (se houver, ver lib/internalCa.js) combinada com o `lookup` anti-SSRF no
 // MESMO agente — trocar por getInternalCaAgent() aqui substituiria a proteção de SSRF
 // em vez de somar a ela.
 const internalCaList = loadCaList();
 const safeHttpsAgent = new https.Agent({
   lookup: safeLookup,
+  ...KEEP_ALIVE_OPTS,
   ...(internalCaList ? { ca: internalCaList } : {}),
 });
 

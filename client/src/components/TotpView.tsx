@@ -1,8 +1,19 @@
 import { useState, useEffect } from 'react';
-import { Plus, Copy, Trash2, Check, ShieldCheck, KeyRound, Eye, EyeOff } from 'lucide-react';
+import {
+  Plus,
+  Copy,
+  Trash2,
+  Check,
+  ShieldCheck,
+  KeyRound,
+  Eye,
+  EyeOff,
+  QrCode,
+} from 'lucide-react';
 import { totpRemaining } from '../utils/totp';
 import { listTotp, addTotp, deleteTotp, type TotpEntry } from '../api/totp';
 import { ConfirmDialog } from './workflow/ConfirmDialog';
+import { TotpExportModal } from './TotpExportModal';
 import { errorDetail } from '../utils/httpError';
 
 // SVG countdown ring
@@ -54,10 +65,12 @@ function CountdownRing({ remaining, total = 30 }: { remaining: number; total?: n
 function TotpCard({
   account,
   remaining,
+  onExport,
   onDelete,
 }: {
   account: TotpEntry;
   remaining: number;
+  onExport: () => void;
   onDelete: () => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -104,6 +117,14 @@ function TotpCard({
         className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
       >
         {copied ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
+      </button>
+
+      <button
+        onClick={onExport}
+        title="Exportar para outro dispositivo"
+        className="p-2 rounded-lg text-slate-300 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors opacity-0 group-hover:opacity-100"
+      >
+        <QrCode size={15} />
       </button>
 
       <button
@@ -178,6 +199,7 @@ export function TotpView() {
   };
 
   const [confirmDelete, setConfirmDelete] = useState<TotpEntry | null>(null);
+  const [exporting, setExporting] = useState<TotpEntry | null>(null);
   const remove = async (id: string) => {
     setAccounts((prev) => prev.filter((a) => a.id !== id));
     try {
@@ -295,11 +317,14 @@ export function TotpView() {
               key={acc.id}
               account={acc}
               remaining={remaining}
+              onExport={() => setExporting(acc)}
               onDelete={() => setConfirmDelete(acc)}
             />
           ))}
         </div>
       )}
+
+      {exporting && <TotpExportModal account={exporting} onClose={() => setExporting(null)} />}
 
       {confirmDelete && (
         <ConfirmDialog

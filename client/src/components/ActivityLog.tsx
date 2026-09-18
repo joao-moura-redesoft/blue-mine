@@ -1,10 +1,18 @@
 import { formatDistanceToNow, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { ArrowRight, Paperclip } from 'lucide-react';
-import type { Journal, JournalDetail, IssueStatus, Issue, Attachment } from '../types/redmine';
+import type {
+  Journal,
+  JournalDetail,
+  IssueStatus,
+  Issue,
+  Attachment,
+  EditField,
+} from '../types/redmine';
 import { Markdown, inlineImageNames } from './Markdown';
 import { attachmentUrl } from '../api/redmine';
 import { PersonAvatar } from './PersonAvatar';
+import { TextDiff } from './TextDiff';
 
 // Anexos adicionados num journal: imagens como miniatura (clicável → lightbox do
 // modal), demais como link de download. Mostra mesmo sem referência inline na nota.
@@ -77,6 +85,7 @@ interface LookupCtx {
   statuses?: IssueStatus[];
   members?: { id: number; name: string }[];
   issue: Issue;
+  editFields?: EditField[];
 }
 
 function labelFor(d: JournalDetail, ctx: LookupCtx): string {
@@ -99,8 +108,20 @@ function valueFor(d: JournalDetail, raw: string | null, ctx: LookupCtx): string 
     if (d.name === 'done_ratio') return `${raw}%`;
     if (d.name === 'is_private') return raw === '1' ? 'Sim' : 'Não';
   }
+  if (d.property === 'cf') {
+    // Campos personalizados do tipo lista guardam o id da opção no journal,
+    // não o texto — resolve pelo schema do formulário (mesmas opções do <select>).
+    const field = ctx.editFields?.find((f) => f.kind === 'custom' && f.cfId === Number(d.name));
+    const opt = field?.options?.find((o) => o.value === raw);
+    if (opt) return opt.label;
+  }
   if (d.property === 'attachment') return raw; // nome do arquivo
   return raw;
+}
+
+// Texto grande o bastante para valer diff em vez de "antes → depois" inteiro.
+function isLongText(s: string): boolean {
+  return s.includes('\n') || s.length > 120;
 }
 
 // Descreve uma mudança de campo de forma legível.
@@ -121,6 +142,20 @@ function DetailLine({ d, ctx }: { d: JournalDetail; ctx: LookupCtx }) {
   const to = valueFor(d, d.new_value, ctx);
   const hasOld = d.old_value != null && d.old_value !== '';
 
+  // Descrição (e afins) vinha como texto velho riscado inteiro + texto novo
+  // inteiro — vira diff estilo git, só com os trechos que mudaram.
+  if (
+    d.property !== 'relation' &&
+    (isLongText(d.old_value ?? '') || isLongText(d.new_value ?? ''))
+  ) {
+    return (
+      <li className="text-xs text-slate-600 dark:text-slate-300">
+        <span className="font-medium">{label}</span>
+        <TextDiff oldText={d.old_value ?? ''} newText={d.new_value ?? ''} />
+      </li>
+    );
+  }
+
   return (
     <li className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1.5 flex-wrap">
       <span className="font-medium">{label}:</span>
@@ -137,18 +172,22 @@ export function ActivityLog({
   statuses,
   members,
   issue,
+  editFields,
   onOpenTalk,
   openingTalkFor,
+  onIssueClick,
 }: {
   journals?: Journal[];
   statuses?: IssueStatus[];
   members?: { id: number; name: string }[];
   issue: Issue;
+  editFields?: EditField[];
   onOpenTalk?: (ncUid: string) => void;
   openingTalkFor?: string | null;
+  onIssueClick?: (id: number) => void;
 }) {
   const entries = (journals ?? []).filter((j) => (j.details?.length ?? 0) > 0 || j.notes?.trim());
-  const ctx: LookupCtx = { statuses, members, issue };
+  const ctx: LookupCtx = { statuses, members, issue, editFields };
 
   if (entries.length === 0) {
     return (
@@ -193,7 +232,12 @@ export function ActivityLog({
               )}
               {j.notes?.trim() && (
                 <div className="bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl rounded-tl-sm px-3 py-2">
-                  <Markdown text={j.notes} attachments={issue.attachments} textile />
+                  <Markdown
+                    text={j.notes}
+                    attachments={issue.attachments}
+                    textile
+                    onIssueClick={onIssueClick}
+                  />
                 </div>
               )}
               <JournalAttachments journal={j} attachments={issue.attachments} />

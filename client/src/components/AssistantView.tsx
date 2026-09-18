@@ -3,6 +3,7 @@ import { Bot, Send, Loader2, Wrench, Sparkles, Trash2, ShieldAlert, Check, X } f
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { redmineApi, type PendingAiAction } from '../api/redmine';
+import { issueRefRegex } from '../utils/issueRef';
 import { getAIKey } from '../utils/aiConfig';
 import { aiErrorMessage } from '../utils/aiError';
 import { ConfirmDialog } from './workflow/ConfirmDialog';
@@ -58,11 +59,8 @@ function MarkdownMessage({
   onIssueClick?: (id: number) => void;
 }) {
   const html = useMemo(() => {
-    // #1234 → [#1234](#rk-issue-1234), sem casar cabeçalhos "# texto" (têm espaço).
-    const linked = text.replace(
-      /(^|[^\w&#])#(\d+)\b/g,
-      (_m, pre, id) => `${pre}[#${id}](#rk-issue-${id})`,
-    );
+    // #92313 → [#92313](#rk-issue-92313), sem casar cabeçalhos "# texto" (têm espaço).
+    const linked = text.replace(issueRefRegex(), '[#$1](#rk-issue-$1)');
     const raw = marked.parse(linked, { async: false }) as string;
     return DOMPurify.sanitize(raw, { ADD_ATTR: ['target'] });
   }, [text]);

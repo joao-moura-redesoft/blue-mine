@@ -66,6 +66,8 @@ import { useJitsi } from './jitsi/JitsiContext';
 import { TalkReconnectModal } from './TalkReconnectModal';
 import { FilePreviewModal, isPreviewable } from './FilePreview';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
+import { useTalkBlobUrl, useTalkFetchedBlobUrl } from '../hooks/useTalkBlobUrl';
+import { useEscapeKey, useClickOutside } from '../hooks/useDismiss';
 import { useBrowserNotifications } from '../hooks/useBrowserNotifications';
 import { pcmToMp3, pcmToWav } from '../utils/encodeMp3';
 import { makeTalkRoom, jitsiRoomUrl, callRoomFromText } from '../utils/jitsiConfig';
@@ -94,8 +96,10 @@ import {
   markMessagesRead,
   uploadFileToTalk,
   MAX_UPLOAD_BYTES,
+  MAX_UPLOAD_LABEL,
   uploadErrorMessage,
   fetchMessages,
+  fetchReactions,
   fetchTalkUser,
   createRoom,
   sendMessage,
@@ -130,6 +134,14 @@ import { talkMute } from '../utils/talkMute';
 import { talkRead } from '../utils/talkRead';
 import { talkPins } from '../utils/talkPins';
 import { talkSaved } from '../utils/talkSaved';
+import { issueRefRegex, isIssueRef } from '../utils/issueRef';
+import { statusDotColor, issueRefTooltip, type IssueRefInfo } from '../utils/issueStatus';
+import {
+  applyMentions,
+  mentionSegments,
+  mentionsFromParams,
+  type MentionMap,
+} from '../utils/talkMentions';
 import type { TalkRoom, TalkMessage, TalkParticipant, TalkMessageParam } from '../api/talk';
 import {
   formatDistanceToNow,
@@ -201,11 +213,20 @@ function escapeRegex(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-type MessagePart = { type: 'text'; content: string } | { type: 'issue'; id: number };
+type MessagePart =
+  | { type: 'text'; content: string }
+  | { type: 'issue'; id: number }
+  | { type: 'mention'; label: string; actorId: string };
 
-function parseMessageParts(text: string): MessagePart[] {
+type Match =
+  | { start: number; end: number; kind: 'issue'; id: number }
+  | { start: number; end: number; kind: 'mention'; label: string; actorId: string };
+
+function parseMessageParts(text: string, mentions: MentionMap = {}): MessagePart[] {
   const auth = getStoredAuth();
-  const matches: Array<{ start: number; end: number; id: number }> = [];
+  const matches: Match[] = [];
+  const overlaps = (start: number, end: number) =>
+    matches.some((mx) => start < mx.end && end > mx.start);
 
   // 1. URLs completas do Redmine: https://host/issues/1234
   if (auth?.url) {
@@ -214,17 +235,46 @@ function parseMessageParts(text: string): MessagePart[] {
       const urlRe = new RegExp(`https?://${escapeRegex(host)}/issues/(\\d+)`, 'g');
       let m: RegExpExecArray | null;
       while ((m = urlRe.exec(text)) !== null)
-        matches.push({ start: m.index, end: m.index + m[0].length, id: parseInt(m[1]) });
+        matches.push({
+          start: m.index,
+          end: m.index + m[0].length,
+          kind: 'issue',
+          id: parseInt(m[1]),
+        });
     } catch {}
   }
 
-  // 2. Referências bare: #1234 ou #123456 (não precedidas/seguidas de letra ou dígito)
-  const hashRe = /(?<!\w)#(\d+)(?!\w)/g;
+  // 2. Referências bare: #92313 (regra única em utils/issueRef — números curtos
+  //    ou com zero à esquerda, tipo #012, não são tarefa e ficam como texto)
+  const hashRe = issueRefRegex();
   let m: RegExpExecArray | null;
   while ((m = hashRe.exec(text)) !== null) {
     // ignora se já coberto por uma URL acima
-    if (!matches.some((mx) => m!.index >= mx.start && m!.index < mx.end))
-      matches.push({ start: m.index, end: m.index + m[0].length, id: parseInt(m[1]) });
+    if (!overlaps(m.index, m.index + m[0].length))
+      matches.push({
+        start: m.index,
+        end: m.index + m[0].length,
+        kind: 'issue',
+        id: parseInt(m[1]),
+      });
+  }
+
+  // 3. Menções que o servidor confirmou (parâmetros da mensagem): só o que ele
+  //    reconheceu como pessoa vira etiqueta — "@" digitado à toa fica texto.
+  //    Nome mais longo primeiro, senão "Ana" comeria o "Ana Maria".
+  for (const label of Object.keys(mentions).sort((a, b) => b.length - a.length)) {
+    const re = new RegExp(`@${escapeRegex(label)}`, 'g');
+    let mm: RegExpExecArray | null;
+    while ((mm = re.exec(text)) !== null) {
+      if (!overlaps(mm.index, mm.index + mm[0].length))
+        matches.push({
+          start: mm.index,
+          end: mm.index + mm[0].length,
+          kind: 'mention',
+          label,
+          actorId: mentions[label],
+        });
+    }
   }
 
   if (matches.length === 0) return [{ type: 'text', content: text }];
@@ -234,32 +284,15 @@ function parseMessageParts(text: string): MessagePart[] {
   let last = 0;
   for (const mx of matches) {
     if (mx.start > last) parts.push({ type: 'text', content: text.slice(last, mx.start) });
-    parts.push({ type: 'issue', id: mx.id });
+    parts.push(
+      mx.kind === 'issue'
+        ? { type: 'issue', id: mx.id }
+        : { type: 'mention', label: mx.label, actorId: mx.actorId },
+    );
     last = mx.end;
   }
   if (last < text.length) parts.push({ type: 'text', content: text.slice(last) });
   return parts;
-}
-
-interface IssueChipData {
-  id: number;
-  subject: string;
-  status?: { id: number; name: string };
-  assigned_to?: { id: number; name: string };
-  tracker?: { name: string };
-  priority?: { name: string };
-  done_ratio?: number;
-}
-
-// Cor do ponto de status por palavra-chave do nome (Redmine varia os nomes).
-function statusDotColor(name?: string): string {
-  const n = (name || '').toLowerCase();
-  if (/fechad|resolvid|conclu|encerrad/.test(n)) return 'bg-green-500';
-  if (/revis|homolog|teste|valida/.test(n)) return 'bg-purple-500';
-  if (/andamento|progress|desenvolv|execu/.test(n)) return 'bg-blue-500';
-  if (/pendent|aguard|espera|impedid|bloque/.test(n)) return 'bg-amber-500';
-  if (/nova|aberta|backlog|entrada/.test(n)) return 'bg-slate-400';
-  return 'bg-slate-400';
 }
 
 function RedmineIssueChip({
@@ -279,22 +312,12 @@ function RedmineIssueChip({
         headers: authHeaders(),
       });
       const d = await r.json();
-      return (d.issues?.[0] ?? null) as IssueChipData | null;
+      return (d.issues?.[0] ?? null) as IssueRefInfo | null;
     },
     enabled: !!auth,
     staleTime: 10 * 60 * 1000,
   });
-  const title = data
-    ? [
-        `#${data.id} — ${data.subject}`,
-        data.status && `Status: ${data.status.name}`,
-        data.assigned_to && `Responsável: ${data.assigned_to.name}`,
-        data.tracker && `Tipo: ${data.tracker.name}`,
-        typeof data.done_ratio === 'number' && `Progresso: ${data.done_ratio}%`,
-      ]
-        .filter(Boolean)
-        .join('\n')
-    : `Abrir #${id}`;
+  const title = issueRefTooltip(data ?? null, id);
   return (
     <button
       onClick={(e) => {
@@ -361,16 +384,20 @@ function TalkAvatar({
   status?: UserStatusType;
 }) {
   const auth = getTalkAuth();
-  const { data: src } = useQuery({
+  const { data: blob } = useQuery({
     queryKey: ['talk-avatar', actorId, size],
     queryFn: async () => {
       const r = await fetch(`/api/talk/avatar/${encodeURIComponent(actorId)}?size=${size}`);
       if (!r.ok) return null;
-      return URL.createObjectURL(await r.blob());
+      return r.blob();
     },
     enabled: !!auth && !!actorId,
     staleTime: 10 * 60 * 1000,
   });
+  // Blob fica no cache do React Query (compartilhado entre bolhas/linhas que
+  // pedem o mesmo avatar); a object URL é local e revogada no cleanup — sem
+  // isso ela vazava a cada avatar visto na sessão (ver useTalkBlobUrl).
+  const src = useTalkBlobUrl(blob);
   const initials = displayName
     .split(' ')
     .filter(Boolean)
@@ -546,16 +573,17 @@ function RoomAvatar({
   status?: UserStatusType;
 }) {
   const auth = getTalkAuth();
-  const { data: src } = useQuery({
+  const { data: blob } = useQuery({
     queryKey: ['talk-room-avatar', room.token, size],
     queryFn: async () => {
       const r = await fetch(`/api/talk/rooms/${room.token}/avatar`);
       if (!r.ok) return null;
-      return URL.createObjectURL(await r.blob());
+      return r.blob();
     },
     enabled: !!auth && room.type !== 1,
     staleTime: 10 * 60 * 1000,
   });
+  const src = useTalkBlobUrl(blob);
 
   if (room.type === 1) {
     return (
@@ -597,33 +625,15 @@ function TalkImage({
   actorId: string;
 }) {
   const auth = getTalkAuth();
-  const [src, setSrc] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState(false);
-  const urlRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!auth) return;
-    let active = true;
+  const previewUrl = useMemo(() => {
+    if (!auth) return null;
     const params = new URLSearchParams({ fileId });
     if (path) params.set('path', path);
     if (actorId) params.set('actorId', actorId);
-    fetch(`/api/talk/file-preview?${params}`)
-      .then((r) => (r.ok ? r.blob() : Promise.reject()))
-      .then((blob) => {
-        if (!active) return;
-        const url = URL.createObjectURL(blob);
-        urlRef.current = url;
-        setSrc(url);
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-    };
-    // Chaveado no arquivo. `auth`/`actorId` são estáveis na sessão; incluí-los
-    // rebaixaria o blob e recriaria o object URL sem necessidade.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileId, path]);
+    return `/api/talk/file-preview?${params}`;
+  }, [auth, fileId, path, actorId]);
+  const { src } = useTalkFetchedBlobUrl(previewUrl);
 
   if (!src) {
     const link = auth ? `${auth.url}/index.php/f/${fileId}` : '#';
@@ -677,9 +687,15 @@ function TalkImage({
 // no Nextcloud caso o download direto falhe.
 // Busca o conteúdo de um anexo do Talk como Blob (para pré-visualização).
 // Extrai o parâmetro de arquivo de uma mensagem (anexo/imagem/voz), se houver.
+// Antes existiam duas versões quase-idênticas desta função (uma aqui, outra
+// como `fileParamOf` perto do painel de arquivos) — o tipo de trap que uma
+// futura correção só aplicaria numa das duas.
 function getMessageFileParam(msg: TalkMessage): TalkMessageParam | null {
-  if (msg.message === '{file}' && msg.messageParameters?.file) return msg.messageParameters.file;
-  return Object.values(msg.messageParameters ?? {}).find((p) => p.type === 'file') ?? null;
+  return (
+    msg.messageParameters?.file ??
+    Object.values(msg.messageParameters ?? {}).find((p) => p.type === 'file') ??
+    null
+  );
 }
 
 async function fetchTalkFileBlob(
@@ -738,44 +754,25 @@ function TalkAudio({
   isVoice: boolean;
 }) {
   const auth = getTalkAuth();
-  const [src, setSrc] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [cur, setCur] = useState(0);
   const [dur, setDur] = useState(0);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const urlRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    if (!auth || !file.id) return;
-    let active = true;
+  const downloadUrl = useMemo(() => {
+    if (!auth || !file.id) return null;
     const params = new URLSearchParams({ fileId: file.id });
     if (file.path) params.set('path', file.path);
     if (actorId) params.set('actorId', actorId);
     if (file.name) params.set('name', file.name);
-    fetch(`/api/talk/file-download?${params}`)
-      .then((r) => (r.ok ? r.blob() : Promise.reject()))
-      .then((blob) => {
-        if (!active) return;
-        // Nextcloud devolve video/webm para gravações de voz; o <audio> toca melhor
-        // com tipo de áudio explícito.
-        const audioBlob = blob.type.startsWith('audio/')
-          ? blob
-          : new Blob([blob], { type: 'audio/webm' });
-        const u = URL.createObjectURL(audioBlob);
-        urlRef.current = u;
-        setSrc(u);
-      })
-      .catch(() => {
-        if (active) setFailed(true);
-      });
-    return () => {
-      active = false;
-      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-    };
-    // Idem: só a identidade do arquivo importa para refazer o download.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file.id]);
+    return `/api/talk/file-download?${params}`;
+  }, [auth, file.id, file.path, actorId, file.name]);
+  const { src, failed } = useTalkFetchedBlobUrl(downloadUrl, {
+    // Nextcloud devolve video/webm para gravações de voz; o <audio> toca melhor
+    // com tipo de áudio explícito.
+    transform: (blob) =>
+      blob.type.startsWith('audio/') ? blob : new Blob([blob], { type: 'audio/webm' }),
+  });
 
   const toggle = () => {
     const a = audioRef.current;
@@ -957,13 +954,7 @@ function FullEmojiPicker({
   }, []);
 
   // Fecha ao clicar fora
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [onClose]);
+  useClickOutside(ref, onClose);
 
   const Picker = mart?.Picker;
   return (
@@ -1011,13 +1002,7 @@ function EmojiPicker({
 
   // Fecha apenas ao clicar fora (não ao tirar o mouse) — assim a transição para o
   // seletor completo não some quando o mouse fica fora da área do picker antigo.
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [onClose]);
+  useClickOutside(ref, onClose);
 
   if (full) {
     return <FullEmojiPicker onPick={onPick} onClose={onClose} align={align} position="bottom" />;
@@ -1057,33 +1042,55 @@ function EmojiPicker({
 // ─── Barra de reações ─────────────────────────────────────────────────────────
 
 function ReactionBar({
+  token,
+  messageId,
   reactions,
   reactionsSelf,
   onToggle,
 }: {
+  token: string;
+  messageId: number;
   reactions: Record<string, number>;
   reactionsSelf: string[];
   onToggle: (emoji: string, remove: boolean) => void;
 }) {
+  // "👍 4" não diz quem: os nomes são buscados só quando o mouse para em cima.
+  const [hovered, setHovered] = useState<string | null>(null);
+  const { data: who } = useQuery({
+    queryKey: ['talk-reactions', token, messageId],
+    queryFn: () => fetchReactions(token, messageId),
+    enabled: hovered !== null && !!token,
+    staleTime: 15_000,
+  });
   const entries = Object.entries(reactions).filter(([, n]) => n > 0);
   if (entries.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-1 mt-1">
       {entries.map(([emoji, count]) => {
         const isMine = reactionsSelf.includes(emoji);
+        const names = who?.[emoji]?.map((p) => p.actorDisplayName).filter(Boolean) ?? [];
         return (
-          <button
-            key={emoji}
-            onClick={() => onToggle(emoji, isMine)}
-            className={`inline-flex items-center gap-0.5 text-[11px] rounded-full px-1.5 py-0.5 border transition-colors ${
-              isMine
-                ? 'bg-blue-100 border-blue-300 text-blue-700 hover:bg-blue-200'
-                : 'bg-slate-100 dark:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
-            }`}
-          >
-            <span>{emoji}</span>
-            <span className="font-medium">{count}</span>
-          </button>
+          <div key={emoji} className="relative">
+            {hovered === emoji && names.length > 0 && (
+              <div className="absolute bottom-full left-0 mb-1 z-30 px-2 py-1 rounded-lg bg-slate-800 dark:bg-slate-700 text-white text-[10px] shadow-lg max-w-[220px]">
+                {names.slice(0, 8).join(', ')}
+                {names.length > 8 ? ` e mais ${names.length - 8}` : ''}
+              </div>
+            )}
+            <button
+              onMouseEnter={() => setHovered(emoji)}
+              onMouseLeave={() => setHovered(null)}
+              onClick={() => onToggle(emoji, isMine)}
+              className={`inline-flex items-center gap-0.5 text-[11px] rounded-full px-1.5 py-0.5 border transition-colors ${
+                isMine
+                  ? 'bg-blue-100 border-blue-300 text-blue-700 hover:bg-blue-200'
+                  : 'bg-slate-100 dark:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+              }`}
+            >
+              <span>{emoji}</span>
+              <span className="font-medium">{count}</span>
+            </button>
+          </div>
         );
       })}
     </div>
@@ -1132,13 +1139,44 @@ function DateDivider({ label }: { label: string }) {
 
 // ─── Bolha de mensagem ────────────────────────────────────────────────────────
 
-function renderBubbleContent(text: string, isMe: boolean, onIssueClick?: (id: number) => void) {
-  const parts = parseMessageParts(text);
+// Etiqueta de menção dentro da bolha. Menção a VOCÊ é a que precisa saltar aos
+// olhos; as outras ficam discretas, só destacadas do texto corrido.
+function MentionChip({ label, isMe, isYou }: { label: string; isMe: boolean; isYou: boolean }) {
+  const tone = isYou
+    ? 'bg-amber-200 text-amber-900 dark:bg-amber-400/30 dark:text-amber-100 font-semibold'
+    : isMe
+      ? 'bg-white/25 text-white font-medium'
+      : 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200 font-medium';
+  return (
+    <span className={`inline rounded px-1 py-px whitespace-nowrap ${tone}`} title={label}>
+      @{label}
+    </span>
+  );
+}
+
+function renderBubbleContent(
+  text: string,
+  isMe: boolean,
+  onIssueClick?: (id: number) => void,
+  mentions: MentionMap = {},
+  myId = '',
+) {
+  const parts = parseMessageParts(text, mentions);
   const nodes: React.ReactNode[] = [];
   parts.forEach((part, pi) => {
     if (part.type === 'issue') {
       nodes.push(
         <RedmineIssueChip key={pi} id={part.id} isMe={isMe} onIssueClick={onIssueClick} />,
+      );
+    } else if (part.type === 'mention') {
+      nodes.push(
+        <MentionChip
+          key={pi}
+          label={part.label}
+          isMe={isMe}
+          // "@todos" também é uma menção a você — mesma cor de destaque
+          isYou={part.actorId === 'all' || (!!myId && part.actorId === myId)}
+        />,
       );
     } else {
       part.content.split('\n').forEach((line, li, arr) => {
@@ -1289,6 +1327,11 @@ function ForwardDialog({ msgs, onClose }: { msgs: TalkMessage[]; onClose: () => 
   const [sending, setSending] = useState<string | null>(null);
   const [doneTo, setDoneTo] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [error, setError] = useState('');
+  // Quantas mensagens já foram entregues COM SUCESSO no destino que falhou —
+  // sem isto, clicar de novo no mesmo destino depois de um erro reenviava a
+  // lista inteira do começo, duplicando as que já tinham chegado antes do erro.
+  const partialRef = useRef<{ token: string; count: number } | null>(null);
   // Encaminha na ordem cronológica; cada mensagem vira uma bolha separada no destino.
   const ordered = [...msgs].sort((a, b) => a.timestamp - b.timestamp);
   const preview =
@@ -1296,13 +1339,7 @@ function ForwardDialog({ msgs, onClose }: { msgs: TalkMessage[]; onClose: () => 
       ? resolveMessageText(ordered[0]) || '📎 Anexo'
       : `${ordered.length} mensagens`;
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscapeKey(onClose);
 
   const targets = rooms
     .filter((r) => r.type !== 4 && r.type !== 6) // exclui changelog e "anotações pessoais"
@@ -1311,12 +1348,25 @@ function ForwardDialog({ msgs, onClose }: { msgs: TalkMessage[]; onClose: () => 
 
   const forward = async (token: string) => {
     setSending(token);
+    setError('');
+    const startAt = partialRef.current?.token === token ? partialRef.current.count : 0;
     try {
-      for (const m of ordered) await sendMessage(token, resolveMessageText(m));
+      for (let i = startAt; i < ordered.length; i++) {
+        await sendMessage(token, resolveMessageText(ordered[i]));
+        partialRef.current = { token, count: i + 1 };
+      }
+      partialRef.current = null;
       setDoneTo(token);
       setTimeout(onClose, 700);
     } catch {
       setSending(null);
+      const sent = partialRef.current?.token === token ? partialRef.current.count : 0;
+      const remaining = ordered.length - sent;
+      setError(
+        sent > 0
+          ? `Falha ao encaminhar — ${remaining} de ${ordered.length} mensagens não foram enviadas. Tente de novo para continuar.`
+          : 'Falha ao encaminhar. Tente de novo.',
+      );
     }
   };
 
@@ -1357,6 +1407,7 @@ function ForwardDialog({ msgs, onClose }: { msgs: TalkMessage[]; onClose: () => 
               className="flex-1 text-xs bg-transparent focus:outline-none placeholder-slate-400 dark:placeholder-slate-500"
             />
           </div>
+          {error && <p className="text-[11px] text-red-500 mt-1.5 px-1">{error}</p>}
         </div>
         <div className="overflow-y-auto scrollbar-thin">
           {targets.length === 0 && (
@@ -1410,13 +1461,7 @@ function AttachNoteDialog({
     const t = setTimeout(() => setDebounced(query.trim()), 350);
     return () => clearTimeout(t);
   }, [query]);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscapeKey(onClose);
 
   const { data: results = [], isFetching } = useQuery({
     queryKey: ['attach-issue-search', debounced],
@@ -1589,13 +1634,7 @@ function ReminderDialog({
     .replace(/\n+/g, ' ')
     .slice(0, 160)}`;
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscapeKey(onClose);
 
   const schedule = async (fireAt: number) => {
     if (!Number.isFinite(fireAt) || fireAt <= Date.now()) {
@@ -1714,6 +1753,7 @@ function ReminderDialog({
 function BubbleImpl({
   msg,
   isMe,
+  myId,
   onIssueClick,
   onJumpTo,
   onReply,
@@ -1783,10 +1823,7 @@ function BubbleImpl({
   selectionMode?: boolean;
   selected?: boolean;
 }) {
-  const file =
-    msg.message === '{file}'
-      ? msg.messageParameters?.file
-      : (Object.values(msg.messageParameters ?? {}).find((p) => p.type === 'file') ?? null);
+  const file = getMessageFileParam(msg);
   const isImage = !!file && !!file.mimetype?.startsWith('image/');
   // Mensagem de voz ou qualquer anexo de áudio → player inline.
   // O Nextcloud reporta .webm como video/webm; nossas gravações de voz são webm/opus,
@@ -1837,6 +1874,23 @@ function BubbleImpl({
   const reactionsSelf = msg.reactionsSelf ?? [];
   // Mensagem de chamada de vídeo do Talk → renderiza card "Entrar na chamada".
   const callRoom = !file ? callRoomFromText(resolveMessageText(msg)) : null;
+  // Menções confirmadas pelo servidor — viram etiqueta no corpo da mensagem.
+  const msgMentions = useMemo(
+    () => mentionsFromParams(msg.messageParameters),
+    [msg.messageParameters],
+  );
+  // BubbleImpl re-renderiza por estado puramente local (showMenu/showEmoji/
+  // actionsOpen/translated) — sem memoizar, só passar o mouse pra revelar a
+  // barra de ações reprocessava markdown + menções + issue refs da mensagem
+  // inteira de novo a cada vez.
+  const bodyContent = useMemo(
+    () => renderBubbleContent(resolveMessageText(msg), isMe, onIssueClick, msgMentions, myId),
+    [msg, isMe, onIssueClick, msgMentions, myId],
+  );
+  const captionContent = useMemo(
+    () => (caption ? renderBubbleContent(caption, isMe, onIssueClick, msgMentions, myId) : null),
+    [caption, isMe, onIssueClick, msgMentions, myId],
+  );
 
   return (
     <div
@@ -1891,13 +1945,15 @@ function BubbleImpl({
         <div id={`talk-msg-${msg.id}`} className="relative rounded-2xl">
           {/* Barra de ações — sobreposta à borda superior da bolha, ancorada para
             dentro p/ nunca ser cortada. Em bolhas otimistas (enviando/falhou) não
-            há ações; aparece no hover (mouse) ou ao tocar a bolha (toque). */}
+            há ações. Fica INVISÍVEL em repouso (senão polui a conversa inteira):
+            aparece no hover do mouse ou ao tocar a bolha, no toque. Escondida
+            também não recebe clique, para não virar alvo invisível sobre a bolha. */}
           {!msg._status && !selectionMode && (
             <div
               className={`absolute top-0 z-20 -translate-y-1/2 ${isMe ? 'right-1' : 'left-1'} flex items-center gap-0.5 transition-opacity ${
                 showEmoji || showMenu || actionsOpen
                   ? 'opacity-100'
-                  : 'opacity-40 group-hover:opacity-100'
+                  : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto'
               }`}
             >
               <button
@@ -2192,15 +2248,13 @@ function BubbleImpl({
                   </button>
                 )}
                 {caption && (
-                  <div className={isImage ? 'px-2 pb-1 pt-1.5' : 'mt-1'}>
-                    {renderBubbleContent(caption, isMe, onIssueClick)}
-                  </div>
+                  <div className={isImage ? 'px-2 pb-1 pt-1.5' : 'mt-1'}>{captionContent}</div>
                 )}
               </>
             ) : callRoom ? (
               <CallCard room={callRoom} isMe={isMe} />
             ) : (
-              renderBubbleContent(resolveMessageText(msg), isMe, onIssueClick)
+              bodyContent
             )}
           </div>
         </div>
@@ -2238,6 +2292,8 @@ function BubbleImpl({
             return url ? <OGPreview url={url} /> : null;
           })()}
         <ReactionBar
+          token={msg.token}
+          messageId={msg.id}
           reactions={reactions}
           reactionsSelf={reactionsSelf}
           onToggle={(e, remove) => onReact(msg.id, e, remove)}
@@ -2380,6 +2436,26 @@ function TypingIndicator({
 
 // ─── Input com autocomplete de @menção, reply e typing ───────────────────────
 
+/** Rascunho guardado de uma sala (mesma chave usada pelo compositor). */
+function readDraft(token: string): string {
+  try {
+    return (localStorage.getItem(`talk-draft-${token}`) ?? '').trim();
+  } catch {
+    return '';
+  }
+}
+
+// Menções do rascunho guardado (nome exibido → actorId).
+function readMentionDraft(key: string): MentionMap {
+  try {
+    const raw = localStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === 'object' ? (parsed as MentionMap) : {};
+  } catch {
+    return {};
+  }
+}
+
 function MessageInput({
   token,
   onSend,
@@ -2387,32 +2463,51 @@ function MessageInput({
   replyTo,
   onCancelReply,
   editValue,
+  editMentions,
   onCancelEdit,
+  onEditLast,
   roomName,
   suggestContext,
 }: {
   token: string;
-  onSend: (msg: string, replyTo?: number) => void;
+  /** `msg` já vai no formato do servidor; `displayText` é o que a pessoa escreveu */
+  onSend: (msg: string, replyTo?: number, displayText?: string, mentions?: MentionMap) => void;
   isPending: boolean;
   replyTo: TalkMessage | null;
   onCancelReply: () => void;
   editValue?: string; // texto pré-preenchido ao editar
+  /** Menções da mensagem sendo editada, para não virarem texto solto ao salvar */
+  editMentions?: MentionMap;
   onCancelEdit?: () => void;
+  /** Seta pra cima com o campo vazio: abre a última mensagem sua para editar */
+  onEditLast?: () => void;
   roomName?: string;
   suggestContext?: string; // últimas mensagens (texto) para sugerir respostas
 }) {
   // Rascunho por sala: preserva o texto digitado ao fechar/reabrir a conversa.
   const draftKey = `talk-draft-${token}`;
+  const mentionsKey = `talk-draft-mentions-${token}`;
   const [input, setInput] = useState(() => editValue ?? localStorage.getItem(draftKey) ?? '');
+  // Nome exibido → actorId das menções deste rascunho. O texto mostra o nome; a
+  // tradução para o id acontece só no envio (ver utils/talkMentions). Vai junto
+  // do rascunho no localStorage para a menção sobreviver a um reload. É estado
+  // (não ref) porque o realce da caixa de texto depende dele para re-renderizar.
+  const [mentions, setMentions] = useState<MentionMap>(
+    () => editMentions ?? readMentionDraft(mentionsKey),
+  );
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionStart, setMentionStart] = useState(0);
   const [issueQuery, setIssueQuery] = useState<string | null>(null);
   const [issueStart, setIssueStart] = useState(0);
+  // Item destacado em cada lista de autocomplete (setas + Enter escolhem).
+  const [mentionIdx, setMentionIdx] = useState(0);
+  const [issueIdx, setIssueIdx] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [uploadPct, setUploadPct] = useState(0);
+  /** Índice do arquivo sendo enviado agora (para o "2 de 3") */
+  const [uploadIdx, setUploadIdx] = useState(0);
   const [uploadError, setUploadError] = useState('');
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
-  const [pendingPreview, setPendingPreview] = useState<string | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [showEmoji, setShowEmoji] = useState(false);
   // Agendar mensagem (enviar depois)
   const [showSchedule, setShowSchedule] = useState(false);
@@ -2423,6 +2518,7 @@ function MessageInput({
   const [suggestions, setSuggestions] = useState<string[] | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const mirrorRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Agenda a mensagem digitada para envio futuro (via servidor).
@@ -2431,8 +2527,15 @@ function MessageInput({
     if (!text || !Number.isFinite(fireAt) || fireAt <= Date.now()) return;
     setScheduling(true);
     try {
-      await createScheduled({ type: 'talk-message', roomToken: token, roomName, text, fireAt });
+      await createScheduled({
+        type: 'talk-message',
+        roomToken: token,
+        roomName,
+        text: toServerText(text),
+        fireAt,
+      });
       setInput('');
+      setMentions({});
       setShowSchedule(false);
       setCustomWhen('');
       setScheduleMsg(`Agendada para ${format(new Date(fireAt), "dd/MM 'às' HH:mm")}`);
@@ -2475,23 +2578,35 @@ function MessageInput({
   };
 
   useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.style.height = '0px';
-      const scrollH = inputRef.current.scrollHeight;
-      inputRef.current.style.height = `${Math.ceil(scrollH) + 2}px`;
+    const ta = inputRef.current;
+    if (!ta) return;
+    ta.style.height = '0px';
+    const scrollH = ta.scrollHeight;
+    ta.style.height = `${Math.ceil(scrollH) + 2}px`;
+    // Quando o texto passa da altura máxima, a barra de rolagem estreita a área
+    // de texto — o espelho precisa reservar a mesma faixa, senão a linha quebra
+    // num ponto diferente e a etiqueta sai do lugar.
+    const mirror = mirrorRef.current;
+    if (mirror) {
+      const gutter = ta.offsetWidth - ta.clientWidth; // 0 quando não há barra
+      mirror.style.paddingRight = `${12 + gutter}px`;
+      mirror.scrollTop = ta.scrollTop;
     }
-  }, [input]);
+  }, [input, mentions]);
   const qc = useQueryClient();
   const { onType, stopTyping } = useTypingSender(token);
   const voice = useVoiceRecorder();
 
-  // Revoga a URL de preview ao trocar/desmontar para evitar vazamento de memória
-  useEffect(
-    () => () => {
-      if (pendingPreview) URL.revokeObjectURL(pendingPreview);
-    },
-    [pendingPreview],
-  );
+  // Miniaturas dos anexos em rascunho — recria e revoga junto com a fila, para
+  // não vazar object URL a cada arquivo adicionado/removido.
+  const [previews, setPreviews] = useState<(string | null)[]>([]);
+  useEffect(() => {
+    const urls = pendingFiles.map((f) =>
+      f.type.startsWith('image/') ? URL.createObjectURL(f) : null,
+    );
+    setPreviews(urls);
+    return () => urls.forEach((u) => u && URL.revokeObjectURL(u));
+  }, [pendingFiles]);
 
   // Inicia a gravação de uma mensagem de voz (pede permissão de microfone).
   const startVoice = async () => {
@@ -2532,27 +2647,30 @@ function MessageInput({
 
   const fmtDur = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
-  // Coloca o arquivo em "rascunho" (preview) em vez de enviar direto
-  const stagePendingFile = (file: File) => {
+  // Põe os arquivos em "rascunho" (preview) em vez de enviar direto. Aceita
+  // vários: colar 3 prints tem que ser um envio só, não três idas ao botão.
+  const stagePendingFiles = (files: File[]) => {
     setUploadError('');
-    if (file.size > MAX_UPLOAD_BYTES) {
-      setUploadError('Arquivo muito grande (máx. 100MB).');
-      return;
-    }
-    setPendingFile(file);
-    setPendingPreview(file.type.startsWith('image/') ? URL.createObjectURL(file) : null);
+    const ok = files.filter((f) => f.size <= MAX_UPLOAD_BYTES);
+    if (ok.length < files.length)
+      setUploadError(`Arquivo muito grande (máx. ${MAX_UPLOAD_LABEL}).`);
+    if (ok.length === 0) return;
+    setPendingFiles((prev) => [...prev, ...ok]);
     setTimeout(() => inputRef.current?.focus(), 0);
   };
 
-  const clearPendingFile = () => {
-    setPendingFile(null);
-    setPendingPreview(null);
-  };
+  const clearPendingFile = () => setPendingFiles([]);
+  const removeStagedAt = (i: number) => setPendingFiles((prev) => prev.filter((_, j) => j !== i));
+  /** Tira da fila os `n` primeiros (os que já subiram). */
+  const removeStagedUpTo = (n: number) => setPendingFiles((prev) => prev.slice(n));
 
   // Sincroniza input quando o usuário troca de mensagem a editar
   useEffect(() => {
     if (editValue !== undefined) {
       setInput(editValue);
+      // O editor abre com "@Nome" (expandido pelo servidor): sem este mapa, salvar
+      // transformaria a menção em texto solto.
+      setMentions(editMentions ?? {});
       setTimeout(() => {
         inputRef.current?.focus();
         inputRef.current?.select();
@@ -2560,6 +2678,7 @@ function MessageInput({
     } else {
       // Ao sair do modo edição, restaura o rascunho da sala (em vez de limpar)
       setInput(localStorage.getItem(draftKey) ?? '');
+      setMentions(readMentionDraft(mentionsKey));
     }
     // draftKey é constante nesta instância: cada sala tem seu próprio
     // ChatWindow (keyed por room.token), então não há troca de sala aqui.
@@ -2569,14 +2688,19 @@ function MessageInput({
   // Persiste o rascunho enquanto não está editando (e limpa quando esvazia/envia)
   useEffect(() => {
     if (editValue !== undefined) return;
-    if (input) localStorage.setItem(draftKey, input);
-    else localStorage.removeItem(draftKey);
-  }, [input, editValue, draftKey]);
+    if (input) {
+      localStorage.setItem(draftKey, input);
+      localStorage.setItem(mentionsKey, JSON.stringify(mentions));
+    } else {
+      localStorage.removeItem(draftKey);
+      localStorage.removeItem(mentionsKey);
+    }
+  }, [input, mentions, editValue, draftKey, mentionsKey]);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    stagePendingFile(file);
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+    stagePendingFiles(files);
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -2584,7 +2708,7 @@ function MessageInput({
     const files = Array.from(e.clipboardData.files);
     if (files.length === 0) return;
     e.preventDefault();
-    stagePendingFile(files[0]);
+    stagePendingFiles(files);
   };
 
   const { data: participants = [] } = useQuery({
@@ -2594,10 +2718,14 @@ function MessageInput({
     staleTime: 60_000,
   });
 
+  // Se o número digitado já é um ID completo, a lista some: quem sabe o número
+  // não precisa escolher nada — e aí o Enter volta a ser "enviar" em vez de
+  // trocar o que foi digitado pela primeira sugestão.
+  const issueSearchable = issueQuery !== null && issueQuery.length >= 1 && !isIssueRef(issueQuery);
   const { data: issueResults = [] } = useQuery({
     queryKey: ['issue-mention', issueQuery],
     queryFn: () => redmineApi.searchIssues(issueQuery!),
-    enabled: issueQuery !== null && issueQuery.length >= 1,
+    enabled: issueSearchable,
     staleTime: 30_000,
   });
 
@@ -2625,30 +2753,37 @@ function MessageInput({
         ]
       : [];
 
+  const issueMatches = issueSearchable ? issueResults.slice(0, 6) : [];
+
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setInput(val);
     onType();
     const cursor = e.target.selectionStart ?? val.length;
     const before = val.slice(0, cursor);
-    // Detecta @menção
-    const atIdx = before.lastIndexOf('@');
-    if (atIdx >= 0) {
-      const q = before.slice(atIdx + 1);
-      if (!q.includes(' ')) {
-        setMentionStart(atIdx);
-        setMentionQuery(q);
-        setIssueQuery(null);
-        return;
-      }
+    setMentionIdx(0);
+    setIssueIdx(0);
+    // Detecta @menção — só no TOKEN atual (início da linha ou depois de espaço),
+    // não em qualquer @ anterior no texto. Com `lastIndexOf` cru, escrever um
+    // e-mail (`fulano@empresa.com`) abria o autocomplete e o mantinha aberto
+    // enquanto o domínio era digitado, porque não havia espaço depois do @
+    // até o texto todo estar pronto.
+    const mentionMatch = before.match(/(?:^|\s)@([^\s]*)$/);
+    if (mentionMatch) {
+      const q = mentionMatch[1];
+      setMentionStart(cursor - q.length - 1);
+      setMentionQuery(q);
+      setIssueQuery(null);
+      return;
     }
     setMentionQuery(null);
-    // Detecta #issue
-    const hashIdx = before.lastIndexOf('#');
-    if (hashIdx >= 0) {
-      const q = before.slice(hashIdx + 1);
-      if (/^\d*$/.test(q) && !q.includes(' ') && q.length <= 8) {
-        setIssueStart(hashIdx);
+    // Detecta #issue — mesma regra de limite de palavra (evita, por ex., abrir
+    // o autocomplete ao digitar uma cor hex "#fff" colada em outro texto).
+    const issueMatch = before.match(/(?:^|\s)#([^\s]*)$/);
+    if (issueMatch) {
+      const q = issueMatch[1];
+      if (/^\d*$/.test(q) && q.length <= 8) {
+        setIssueStart(cursor - q.length - 1);
         setIssueQuery(q);
         return;
       }
@@ -2667,39 +2802,58 @@ function MessageInput({
   const insertMention = (p: TalkParticipant) => {
     const before = input.slice(0, mentionStart);
     const after = input.slice(mentionStart + 1 + (mentionQuery?.length ?? 0));
-    // @all = mencionar todos; outros = actorId
-    setInput(`${before}@${p.actorId} ${after}`);
+    // No texto entra o NOME (o id é um UUID, ilegível); a troca pelo actorId
+    // acontece no envio — "Todos" vira @all.
+    const label = p.displayName || p.actorId;
+    setMentions((prev) => ({ ...prev, [label]: p.actorId }));
+    setInput(`${before}@${label} ${after}`);
     setMentionQuery(null);
     setTimeout(() => inputRef.current?.focus(), 0);
   };
 
+  /** Texto como o servidor precisa receber (menções pelo id). */
+  const toServerText = (text: string) => applyMentions(text, mentions);
+
   const submit = async () => {
     if (isPending || uploading) return;
 
-    // Rascunho de arquivo: envia o anexo com o texto como legenda
-    if (pendingFile) {
-      const caption = input.trim();
+    // Rascunho de anexos: um envio por arquivo (é assim que o Talk guarda), com
+    // o texto como legenda do primeiro. Se um falhar, os que já subiram ficam e
+    // só os restantes voltam para a fila — reenviar não duplica o que foi.
+    if (pendingFiles.length > 0) {
+      const caption = toServerText(input.trim());
       stopTyping();
       setUploading(true);
       setUploadPct(0);
       setUploadError('');
+      let sent = 0;
       try {
-        const result = await uploadFileToTalk(token, pendingFile, caption, (pct) =>
-          setUploadPct(pct),
-        );
-        if (result.success) {
-          qc.invalidateQueries({ queryKey: ['talk-messages', token] });
-          clearPendingFile();
-          setInput('');
-          setMentionQuery(null);
-          setIssueQuery(null);
-        } else if (result.error) {
-          setUploadError(result.error);
+        for (const [i, file] of pendingFiles.entries()) {
+          setUploadIdx(i);
+          setUploadPct(0); // barra recomeça a cada arquivo
+          const result = await uploadFileToTalk(token, file, i === 0 ? caption : '', (pct) =>
+            setUploadPct(pct),
+          );
+          if (!result.success) {
+            setUploadError(result.error || 'Falha ao enviar o arquivo.');
+            break;
+          }
+          sent++;
         }
       } catch (e: unknown) {
         setUploadError(uploadErrorMessage(e));
       } finally {
         setUploading(false);
+        setUploadIdx(0);
+        qc.invalidateQueries({ queryKey: ['talk-messages', token] });
+        if (sent > 0) {
+          // a legenda foi junto do primeiro: só limpa o texto se ele saiu
+          setInput('');
+          setMentions({});
+          setMentionQuery(null);
+          setIssueQuery(null);
+        }
+        removeStagedUpTo(sent);
       }
       return;
     }
@@ -2707,8 +2861,9 @@ function MessageInput({
     const text = input.trim();
     if (!text) return;
     stopTyping();
-    onSend(text, replyTo?.id);
+    onSend(toServerText(text), replyTo?.id, text, mentions);
     setInput('');
+    setMentions({});
     setMentionQuery(null);
     setIssueQuery(null);
   };
@@ -2717,14 +2872,19 @@ function MessageInput({
     <div className="relative flex-shrink-0">
       {filtered.length > 0 && (
         <div className="absolute bottom-full left-2 right-2 mb-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden z-10">
-          {filtered.map((p) => (
+          {filtered.map((p, i) => (
             <button
               key={p.actorId}
               onMouseDown={(e) => {
                 e.preventDefault();
                 insertMention(p);
               }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 text-left transition-colors"
+              onMouseEnter={() => setMentionIdx(i)}
+              className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${
+                i === Math.min(mentionIdx, filtered.length - 1)
+                  ? 'bg-blue-50 dark:bg-slate-800'
+                  : ''
+              }`}
             >
               {p.actorId === 'all' ? (
                 <div className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0">
@@ -2739,9 +2899,12 @@ function MessageInput({
                 <span className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate block">
                   {p.displayName}
                 </span>
-                <span className="text-[10px] text-slate-400 dark:text-slate-400">
-                  {p.actorId === 'all' ? 'Notifica todos os participantes' : p.actorId}
-                </span>
+                {/* O actorId é um UUID do LDAP: não diz nada a ninguém, fica de fora */}
+                {p.actorId === 'all' && (
+                  <span className="text-[10px] text-slate-400 dark:text-slate-400">
+                    Notifica todos os participantes
+                  </span>
+                )}
               </div>
             </button>
           ))}
@@ -2749,16 +2912,21 @@ function MessageInput({
       )}
 
       {/* Autocomplete de #issue */}
-      {issueQuery !== null && issueResults.length > 0 && (
+      {issueMatches.length > 0 && (
         <div className="absolute bottom-full left-2 right-2 mb-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden z-10 max-h-48 overflow-y-auto">
-          {issueResults.slice(0, 6).map((issue) => (
+          {issueMatches.map((issue, i) => (
             <button
               key={issue.id}
               onMouseDown={(e) => {
                 e.preventDefault();
                 insertIssueMention(issue);
               }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 text-left transition-colors"
+              onMouseEnter={() => setIssueIdx(i)}
+              className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${
+                i === Math.min(issueIdx, issueMatches.length - 1)
+                  ? 'bg-blue-50 dark:bg-slate-800'
+                  : ''
+              }`}
             >
               <div className="w-6 h-6 rounded bg-blue-100 dark:bg-blue-950/40 flex items-center justify-center text-blue-700 dark:text-blue-300 text-[9px] font-bold flex-shrink-0 font-mono">
                 #
@@ -2795,35 +2963,53 @@ function MessageInput({
         </div>
       )}
 
-      {/* Rascunho de anexo (preview antes de enviar) */}
-      {pendingFile && !uploading && (
-        <div className="flex items-center gap-2.5 px-3 pt-2 pb-1 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
-          {pendingPreview ? (
-            <img
-              src={pendingPreview}
-              alt={pendingFile.name}
-              className="w-12 h-12 rounded-lg object-cover flex-shrink-0"
-            />
-          ) : (
-            <div className="w-12 h-12 rounded-lg bg-slate-200 dark:bg-slate-700 flex items-center justify-center flex-shrink-0">
-              <Paperclip size={18} className="text-slate-400 dark:text-slate-400" />
-            </div>
-          )}
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate">
-              {pendingFile.name}
-            </p>
+      {/* Rascunho de anexos (preview antes de enviar) */}
+      {pendingFiles.length > 0 && !uploading && (
+        <div className="px-3 pt-2 pb-1 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+          <div className="flex items-center justify-between mb-1">
             <p className="text-[10px] text-slate-400 dark:text-slate-400">
-              {(pendingFile.size / 1024).toFixed(0)} KB · adicione uma descrição abaixo
+              {pendingFiles.length === 1
+                ? '1 anexo · a descrição abaixo vira legenda'
+                : `${pendingFiles.length} anexos · a descrição abaixo vira legenda do primeiro`}
             </p>
+            <button
+              onClick={clearPendingFile}
+              className="text-[10px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+            >
+              Remover todos
+            </button>
           </div>
-          <button
-            onClick={clearPendingFile}
-            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 flex-shrink-0"
-            title="Remover anexo"
-          >
-            <X size={14} />
-          </button>
+          <div className="flex flex-wrap gap-2">
+            {pendingFiles.map((f, i) => (
+              <div
+                key={`${f.name}-${i}`}
+                className="relative group/att flex items-center gap-1.5 pl-1 pr-5 py-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 max-w-[180px]"
+                title={`${f.name} · ${(f.size / 1024).toFixed(0)} KB`}
+              >
+                {previews[i] ? (
+                  <img
+                    src={previews[i]!}
+                    alt={f.name}
+                    className="w-8 h-8 rounded object-cover flex-shrink-0"
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded bg-slate-100 dark:bg-slate-700 flex items-center justify-center flex-shrink-0">
+                    <Paperclip size={13} className="text-slate-400 dark:text-slate-400" />
+                  </div>
+                )}
+                <span className="text-[11px] text-slate-600 dark:text-slate-300 truncate">
+                  {f.name}
+                </span>
+                <button
+                  onClick={() => removeStagedAt(i)}
+                  title="Remover"
+                  className="absolute top-0.5 right-0.5 text-slate-400 hover:text-red-500"
+                >
+                  <X size={11} />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -2836,7 +3022,9 @@ function MessageInput({
             />
           </div>
           <p className="text-[10px] text-slate-400 dark:text-slate-400 mt-0.5">
-            Enviando… {uploadPct}%
+            {pendingFiles.length > 1
+              ? `Enviando ${uploadIdx + 1} de ${pendingFiles.length}… ${uploadPct}%`
+              : `Enviando… ${uploadPct}%`}
           </p>
         </div>
       )}
@@ -2984,35 +3172,110 @@ function MessageInput({
               {suggesting ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
             </button>
           )}
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={handleChange}
-            rows={1}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                submit();
+          {/* Caixa de texto com as menções destacadas. Um <textarea> não aceita
+              HTML dentro, então o realce é uma camada ATRÁS dele: mesmo texto,
+              mesma métrica, letras invisíveis — só o fundo da etiqueta aparece,
+              exatamente sob o texto real. A borda/fundo saem do textarea e vão
+              para o invólucro, senão as duas camadas desalinhariam. */}
+          <div className="flex-1 relative bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden focus-within:ring-2 focus-within:ring-blue-400 focus-within:border-transparent">
+            <div
+              ref={mirrorRef}
+              aria-hidden
+              className="absolute inset-0 px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap break-words overflow-hidden pointer-events-none select-none text-transparent"
+            >
+              {mentionSegments(input, mentions).map((seg, i) =>
+                seg.isMention ? (
+                  <span
+                    key={i}
+                    className="rounded bg-blue-100 dark:bg-blue-900/50 box-decoration-clone"
+                  >
+                    {seg.t}
+                  </span>
+                ) : (
+                  <span key={i}>{seg.t}</span>
+                ),
+              )}
+            </div>
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={handleChange}
+              onScroll={(e) => {
+                if (mirrorRef.current) mirrorRef.current.scrollTop = e.currentTarget.scrollTop;
+              }}
+              rows={1}
+              onKeyDown={(e) => {
+                // Com uma lista de autocomplete aberta, as setas navegam e o
+                // Enter ESCOLHE — antes ele enviava a mensagem por cima da lista.
+                const list = filtered.length ? 'mention' : issueMatches.length ? 'issue' : null;
+                if (list) {
+                  const len = list === 'mention' ? filtered.length : issueMatches.length;
+                  const setIdx = list === 'mention' ? setMentionIdx : setIssueIdx;
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setIdx((i) => (i + 1) % len);
+                    return;
+                  }
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setIdx((i) => (i - 1 + len) % len);
+                    return;
+                  }
+                  // Enter só ESCOLHE se algo foi digitado depois do "@" (ou se a
+                  // seleção foi movida): com a lista aberta só pelo "@" solto,
+                  // Enter tem que continuar sendo "enviar" — senão um texto que
+                  // termina em "@" vira "@Todos" sem querer.
+                  const picking =
+                    list === 'issue' || (mentionQuery?.length ?? 0) > 0 || mentionIdx > 0;
+                  if (picking && (e.key === 'Enter' || e.key === 'Tab')) {
+                    e.preventDefault();
+                    if (list === 'mention') insertMention(filtered[Math.min(mentionIdx, len - 1)]);
+                    else insertIssueMention(issueMatches[Math.min(issueIdx, len - 1)]);
+                    return;
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setMentionQuery(null);
+                    setIssueQuery(null);
+                    return;
+                  }
+                }
+                // Campo vazio + seta pra cima = editar a última mensagem sua
+                if (
+                  e.key === 'ArrowUp' &&
+                  !input &&
+                  editValue === undefined &&
+                  pendingFiles.length === 0 &&
+                  onEditLast
+                ) {
+                  e.preventDefault();
+                  onEditLast();
+                  return;
+                }
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  submit();
+                }
+                if (e.key === 'Escape') {
+                  setMentionQuery(null);
+                  setIssueQuery(null);
+                  clearPendingFile();
+                  onCancelReply();
+                  onCancelEdit?.();
+                }
+              }}
+              onPaste={handlePaste}
+              placeholder={
+                editValue !== undefined
+                  ? 'Editando mensagem…'
+                  : pendingFiles.length > 0
+                    ? 'Adicione uma descrição… (opcional)'
+                    : 'Mensagem… (@nome para mencionar)'
               }
-              if (e.key === 'Escape') {
-                setMentionQuery(null);
-                setIssueQuery(null);
-                clearPendingFile();
-                onCancelReply();
-                onCancelEdit?.();
-              }
-            }}
-            onPaste={handlePaste}
-            placeholder={
-              editValue !== undefined
-                ? 'Editando mensagem…'
-                : pendingFile
-                  ? 'Adicione uma descrição… (opcional)'
-                  : 'Mensagem… (@nome para mencionar)'
-            }
-            className="flex-1 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-400 dark:placeholder-slate-500 resize-none max-h-32 overflow-y-auto scrollbar-thin leading-relaxed"
-          />
-          {input.trim() && !pendingFile && editValue === undefined && (
+              className="relative w-full block text-xs bg-transparent px-3 py-2 focus:outline-none placeholder-slate-400 dark:placeholder-slate-500 resize-none max-h-32 overflow-y-auto scrollbar-thin leading-relaxed"
+            />
+          </div>
+          {input.trim() && pendingFiles.length === 0 && editValue === undefined && (
             <button
               onClick={() => setShowSchedule((v) => !v)}
               disabled={uploading}
@@ -3022,7 +3285,7 @@ function MessageInput({
               <Clock size={14} />
             </button>
           )}
-          {input.trim() || pendingFile ? (
+          {input.trim() || pendingFiles.length > 0 ? (
             <button
               onClick={submit}
               disabled={isPending || uploading}
@@ -3044,6 +3307,21 @@ function MessageInput({
       )}
     </div>
   );
+}
+
+// Espera até um elemento existir no DOM (poll por frame) em vez de uma pausa
+// fixa. `jumpToMessage` usava `setTimeout(350)` depois de buscar o contexto
+// histórico: numa máquina lenta, ou quando a janela cresce bastante, o render
+// pode legitimamente demorar mais que isso — e a mensagem simplesmente não
+// aparecia, sem erro nem nova tentativa. O poll aguarda até `timeoutMs`.
+async function waitForElement(id: string, timeoutMs: number): Promise<HTMLElement | null> {
+  const deadline = Date.now() + timeoutMs;
+  let el = document.getElementById(id);
+  while (!el && Date.now() < deadline) {
+    await new Promise((r) => requestAnimationFrame(r));
+    el = document.getElementById(id);
+  }
+  return el;
 }
 
 // ─── Janela de chat ───────────────────────────────────────────────────────────
@@ -3148,6 +3426,16 @@ function ChatWindow({
   const [dropUploading, setDropUploading] = useState(false);
   const dragCounter = useRef(0);
 
+  // Banner de erro genérico no topo da janela — usado tanto pelo upload via
+  // drag-and-drop quanto por ações que antes falhavam em silêncio (abrir DM,
+  // responder no privado). Some sozinho, mas o `cur === msg` evita apagar um
+  // erro MAIS NOVO caso duas ações falhem em sequência antes do timeout.
+  const [actionError, setActionError] = useState('');
+  const showActionError = useCallback((msg: string) => {
+    setActionError(msg);
+    setTimeout(() => setActionError((cur) => (cur === msg ? '' : cur)), 5000);
+  }, []);
+
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
     dragCounter.current++;
@@ -3165,19 +3453,26 @@ function ChatWindow({
     e.preventDefault();
     dragCounter.current = 0;
     setIsDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (!file) return;
-    if (file.size > MAX_UPLOAD_BYTES) {
-      alert('Arquivo muito grande (máx. 100MB).');
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+    if (files.some((f) => f.size > MAX_UPLOAD_BYTES)) {
+      showActionError(`Arquivo muito grande (máx. ${MAX_UPLOAD_LABEL}).`);
       return;
     }
     setDropUploading(true);
     try {
-      const result = await uploadFileToTalk(room.token, file);
-      if (result.success) qc.invalidateQueries({ queryKey: ['talk-messages', room.token] });
-      else if (result.error) alert(result.error);
+      // Um envio por arquivo (é assim que o Talk guarda anexo); para na primeira
+      // falha para não empilhar erro em cima de erro.
+      for (const file of files) {
+        const result = await uploadFileToTalk(room.token, file);
+        if (!result.success) {
+          if (result.error) showActionError(result.error);
+          break;
+        }
+      }
+      qc.invalidateQueries({ queryKey: ['talk-messages', room.token] });
     } catch (e: unknown) {
-      alert(uploadErrorMessage(e));
+      showActionError(uploadErrorMessage(e));
     } finally {
       setDropUploading(false);
     }
@@ -3255,7 +3550,7 @@ function ChatWindow({
           expandiu = true;
           return precisa;
         });
-        if (expandiu) await new Promise((r) => setTimeout(r, 0)); // deixa o React pintar
+        if (expandiu) await waitForElement(`talk-msg-${id}`, 1000); // deixa o React pintar
       }
 
       let el = document.getElementById(`talk-msg-${id}`);
@@ -3274,8 +3569,7 @@ function ChatWindow({
         } finally {
           setJumpingTo(null);
         }
-        await new Promise((r) => setTimeout(r, 350)); // espera o render do contexto
-        el = document.getElementById(`talk-msg-${id}`);
+        el = await waitForElement(`talk-msg-${id}`, 2000); // espera o render do contexto
       }
       if (!el) return;
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -3339,10 +3633,12 @@ function ChatWindow({
         qc.invalidateQueries({ queryKey: ['talk-rooms'] });
         onOpenRoom(dm);
       } catch {
-        /* falha silenciosa — usuário pode tentar pela lista */
+        // Antes falhava em silêncio — clicar em "Mensagem Direta" e nada
+        // acontecer, sem indício do que deu errado nem como tentar de novo.
+        showActionError('Não foi possível abrir a conversa. Tente de novo.');
       }
     },
-    [qc, onOpenRoom],
+    [qc, onOpenRoom, showActionError],
   );
 
   // "Responder no privado": abre a DM com o autor da mensagem e semeia o rascunho da
@@ -3362,10 +3658,10 @@ function ChatWindow({
         qc.invalidateQueries({ queryKey: ['talk-rooms'] });
         onOpenRoom(dm);
       } catch {
-        /* falha silenciosa */
+        showActionError('Não foi possível abrir a conversa. Tente de novo.');
       }
     },
-    [qc, onOpenRoom],
+    [qc, onOpenRoom, showActionError],
   );
 
   // Mensagem fixada (LOCAL — só o próprio usuário vê; ver utils/talkPins).
@@ -3630,7 +3926,12 @@ function ChatWindow({
     return () => observer.disconnect();
   }, [scrollToBottom]);
 
-  const handleSend = (text: string, replyId?: number) => {
+  const handleSend = (
+    text: string,
+    replyId?: number,
+    displayText?: string,
+    mentions?: MentionMap,
+  ) => {
     if (editTarget) {
       editMsg.mutate({ messageId: editTarget.id, message: text });
       setEditTarget(null);
@@ -3646,7 +3947,13 @@ function ChatWindow({
           }
         : undefined;
       send.mutate(
-        { message: text, replyTo: replyId, _parent: parentForTemp, _text: text },
+        {
+          message: text,
+          replyTo: replyId,
+          _parent: parentForTemp,
+          _text: displayText ?? text,
+          _mentions: mentions,
+        },
         {
           onSuccess: (data) => {
             // Persiste a citação da própria mensagem: usa o parent do servidor se vier,
@@ -3667,8 +3974,15 @@ function ChatWindow({
       qc.setQueryData(['talk-messages', room.token], (old: TalkMessage[] = []) =>
         old.filter((m) => m.id !== msg.id),
       );
-      const text = msg._clientText ?? msg.message;
-      send.mutate({ message: text, replyTo: msg._clientReplyTo, _parent: msg.parent, _text: text });
+      // _clientText guarda o texto do servidor (menções por id); msg.message é o
+      // que a bolha mostra (menções por nome) — reenvia um, exibe o outro.
+      send.mutate({
+        message: msg._clientText ?? msg.message,
+        replyTo: msg._clientReplyTo,
+        _parent: msg.parent,
+        _text: msg.message,
+        _mentions: mentionsFromParams(msg.messageParameters),
+      });
     },
     [qc, room.token, send],
   );
@@ -3797,6 +4111,21 @@ function ChatWindow({
     setReplyTo(null);
   }, []);
 
+  // Seta pra cima no campo vazio: edita a última mensagem de texto que EU mandei
+  // (o Talk não deixa editar anexo nem mensagem de sistema).
+  const editLastOwn = useCallback(() => {
+    // A lista renderizada é da mais antiga para a mais nova: procura de trás.
+    const list = visibleMessagesRef.current;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const m = list[i];
+      if (m.actorId !== myId || m._status || m.systemMessage) continue;
+      if (m.messageType !== 'comment') continue;
+      if (Object.values(m.messageParameters ?? {}).some((p) => p.type === 'file')) continue;
+      handleEdit(m);
+      return;
+    }
+  }, [myId, handleEdit]);
+
   const handleDelete = useCallback(
     (msg: TalkMessage) => {
       deleteMsg.mutate(msg.id);
@@ -3820,10 +4149,14 @@ function ChatWindow({
   );
 
   const handleReact = useCallback(
-    (msgId: number, emoji: string, remove: boolean) =>
-      react.mutate({ messageId: msgId, reaction: emoji, remove }),
+    (msgId: number, emoji: string, remove: boolean) => {
+      react.mutate({ messageId: msgId, reaction: emoji, remove });
+      // A lista de quem reagiu (tooltip) tem cache próprio: sem isso ela mostra
+      // a foto antiga por até 15s depois de você mesmo reagir.
+      qc.invalidateQueries({ queryKey: ['talk-reactions', room.token, msgId] });
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ver nota em handleDelete
-    [react.mutate],
+    [react.mutate, qc, room.token],
   );
 
   const handleForward = useCallback((msg: TalkMessage) => setForwardMsgs([msg]), []);
@@ -3881,6 +4214,19 @@ function ChatWindow({
             <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
             <span className="text-xs text-slate-500 dark:text-slate-400">Enviando…</span>
           </div>
+        </div>
+      )}
+      {actionError && (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-300 text-[11px] px-3 py-1.5 rounded-lg shadow-lg max-w-[90%]">
+          <AlertCircle size={12} className="flex-shrink-0" />
+          <span className="truncate">{actionError}</span>
+          <button
+            onClick={() => setActionError('')}
+            aria-label="Fechar aviso"
+            className="flex-shrink-0 hover:opacity-70"
+          >
+            <X size={11} />
+          </button>
         </div>
       )}
 
@@ -4001,12 +4347,16 @@ function ChatWindow({
         </div>
         <button
           onClick={onMinimize}
+          aria-label="Minimizar conversa"
+          title="Minimizar"
           className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
         >
           <Minus size={12} />
         </button>
         <button
           onClick={onClose}
+          aria-label="Fechar conversa"
+          title="Fechar"
           className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
         >
           <X size={12} />
@@ -4140,11 +4490,22 @@ function ChatWindow({
         </div>
       )}
 
-      {/* Banner de mensagem fixada (local) */}
+      {/* Banner de mensagem fixada (local). É uma <div role="button"> (não <button>)
+          porque contém outro controle clicável (desafixar) — dois elementos
+          interativos aninhados são HTML inválido e o navegador não garante o
+          comportamento nem a árvore de acessibilidade dos dois. */}
       {pinned && (
-        <button
+        <div
           onClick={() => jumpToMessage(pinned.id)}
-          className="flex items-center gap-2 w-full px-3 py-1.5 bg-amber-50 border-b border-amber-100 text-left hover:bg-amber-100/70 transition-colors group/pin"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              jumpToMessage(pinned.id);
+            }
+          }}
+          role="button"
+          tabIndex={0}
+          className="flex items-center gap-2 w-full px-3 py-1.5 bg-amber-50 border-b border-amber-100 text-left hover:bg-amber-100/70 transition-colors group/pin cursor-pointer"
           title="Ir para a mensagem fixada"
         >
           <Pin size={12} className="text-amber-500 flex-shrink-0 rotate-45" />
@@ -4154,19 +4515,19 @@ function ChatWindow({
             </span>
             {pinned.text}
           </span>
-          <span
-            role="button"
-            tabIndex={0}
+          <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
               talkPins.clear(room.token);
             }}
             className="flex-shrink-0 p-0.5 rounded text-amber-400 hover:text-amber-600 hover:bg-amber-200/60"
             title="Desafixar"
+            aria-label="Desafixar mensagem"
           >
             <PinOff size={12} />
-          </span>
-        </button>
+          </button>
+        </div>
       )}
 
       {/* Mensagens */}
@@ -4319,7 +4680,9 @@ function ChatWindow({
         replyTo={replyTo}
         onCancelReply={() => setReplyTo(null)}
         editValue={editTarget ? resolveMessageText(editTarget) : undefined}
+        editMentions={editTarget ? mentionsFromParams(editTarget.messageParameters) : undefined}
         onCancelEdit={() => setEditTarget(null)}
+        onEditLast={editLastOwn}
         roomName={room.displayName}
         suggestContext={suggestContext}
       />
@@ -4821,44 +5184,19 @@ function GroupInfoPanel({
 
 // ─── Painel de Arquivos e Links ───────────────────────────────────────────────
 
-function fileParamOf(m: TalkMessage) {
-  return (
-    m.messageParameters?.file ??
-    Object.values(m.messageParameters ?? {}).find((p) => p.type === 'file') ??
-    null
-  );
-}
-
 // Miniatura de um arquivo compartilhado (imagem com preview; senão ícone).
 function ShareThumb({ msg }: { msg: TalkMessage }) {
   const auth = getTalkAuth();
-  const file = fileParamOf(msg);
+  const file = getMessageFileParam(msg);
   const isImage = !!file?.mimetype?.startsWith('image/');
-  const [src, setSrc] = useState<string | null>(null);
-  const urlRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!auth || !isImage || !file?.id) return;
-    let active = true;
+  const previewUrl = useMemo(() => {
+    if (!auth || !isImage || !file?.id) return null;
     const params = new URLSearchParams({ fileId: file.id });
     if (file.path) params.set('path', file.path);
     if (msg.actorId) params.set('actorId', msg.actorId);
-    fetch(`/api/talk/file-preview?${params}`)
-      .then((r) => (r.ok ? r.blob() : Promise.reject()))
-      .then((blob) => {
-        if (!active) return;
-        const u = URL.createObjectURL(blob);
-        urlRef.current = u;
-        setSrc(u);
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-    };
-    // Idem: só a identidade do arquivo importa para refazer o download.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file?.id, isImage]);
+    return `/api/talk/file-preview?${params}`;
+  }, [auth, isImage, file?.id, file?.path, msg.actorId]);
+  const { src } = useTalkFetchedBlobUrl(previewUrl);
 
   const handleClick = () => {
     if (!file) return;
@@ -4920,8 +5258,10 @@ function MediaPanel({
       ...(shares.audio ?? []),
       ...(shares.other ?? []),
     ];
-    const fromMessages = messages.filter((m) => m.messageType === 'comment' && !!fileParamOf(m));
-    const all = [...fromShares, ...fromMessages].filter((m) => !!fileParamOf(m));
+    const fromMessages = messages.filter(
+      (m) => m.messageType === 'comment' && !!getMessageFileParam(m),
+    );
+    const all = [...fromShares, ...fromMessages].filter((m) => !!getMessageFileParam(m));
     const byId = new Map(all.map((m) => [m.id, m]));
     return [...byId.values()].sort((a, b) => b.timestamp - a.timestamp);
   }, [shares, messages]);
@@ -4932,7 +5272,7 @@ function MediaPanel({
     const seen = new Set<string>();
     const out: Array<{ url: string; actor: string; timestamp: number }> = [];
     for (const m of messages) {
-      if (m.messageType !== 'comment' || fileParamOf(m)) continue;
+      if (m.messageType !== 'comment' || getMessageFileParam(m)) continue;
       const text = resolveMessageText(m);
       let mt: RegExpExecArray | null;
       re.lastIndex = 0;
@@ -5267,13 +5607,7 @@ function MyStatusMenu({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     setMessage(my?.message ?? '');
   }, [my?.message]);
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [onClose]);
+  useClickOutside(ref, onClose);
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['talk-my-status'] });
@@ -5571,7 +5905,7 @@ function ConversationsPanel({
   newAlerts: Set<string>;
   myId: string;
 }) {
-  const { data: rooms = [], isLoading, isError } = useTalkRooms();
+  const { data: rooms = [], isLoading, isError, isFetching, refetch } = useTalkRooms();
   const { data: statuses } = useUserStatuses();
   const { data: me } = useTalkCurrentUser();
   const [showNewConv, setShowNewConv] = useState(false);
@@ -5617,6 +5951,14 @@ function ConversationsPanel({
                 <Wifi size={12} className="text-green-400" />
               )}
             </span>
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              title="Recarregar conversas"
+              className="p-0.5 text-slate-300 hover:text-blue-600 dark:text-slate-500 dark:hover:text-blue-400 disabled:opacity-50 transition-colors"
+            >
+              <RotateCw size={11} className={isFetching ? 'animate-spin' : ''} />
+            </button>
           </div>
           <div className="flex items-center gap-1">
             {myId && (
@@ -5670,17 +6012,29 @@ function ConversationsPanel({
         </div>
 
         <div className="flex-1 overflow-y-auto scrollbar-thin">
-          {isLoading && (
-            <div className="flex items-center justify-center h-20 text-slate-400 dark:text-slate-400 text-xs">
+          {(isLoading || (isFetching && sorted.length === 0 && !isError)) && (
+            <div className="flex flex-col items-center justify-center h-20 gap-1.5 text-slate-400 dark:text-slate-400 text-xs">
+              <Loader2 size={16} className="animate-spin" />
               Carregando conversas…
             </div>
           )}
           {isError && !isLoading && (
-            <div className="flex flex-col items-center justify-center h-20 gap-1">
+            <div className="flex flex-col items-center justify-center h-20 gap-1.5">
               <WifiOff size={20} className="text-red-300" />
               <span className="text-xs text-slate-400 dark:text-slate-400">
                 Nextcloud inacessível
               </span>
+              <button
+                onClick={() => refetch()}
+                className="flex items-center gap-1 text-[11px] text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
+              >
+                <RotateCw size={11} /> Tentar de novo
+              </button>
+            </div>
+          )}
+          {!isLoading && !isFetching && !isError && sorted.length === 0 && (
+            <div className="flex items-center justify-center h-20 text-slate-400 dark:text-slate-400 text-xs">
+              Nenhuma conversa ainda
             </div>
           )}
           {sorted.map((room) => {
@@ -5688,6 +6042,9 @@ function ConversationsPanel({
             const hasAlert = newAlerts.has(room.token);
             const lastText = room.lastMessage ? resolveMessageText(room.lastMessage) : '';
             const lastName = room.lastMessage?.actorDisplayName.split(' ')[0];
+            // Mensagem começada e não enviada: sem isso ela some da vista junto
+            // com a janela da conversa e ninguém lembra que ficou pela metade.
+            const draft = readDraft(room.token);
             return (
               <button
                 key={room.token}
@@ -5719,13 +6076,19 @@ function ConversationsPanel({
                       </span>
                     )}
                   </div>
-                  {lastText && (
-                    <p
-                      className={`text-[11px] truncate mt-0.5 ${room.unreadMessages > 0 || hasAlert ? 'text-slate-600 dark:text-slate-300' : 'text-slate-400 dark:text-slate-400'}`}
-                    >
-                      {lastName ? `${lastName}: ` : ''}
-                      {lastText}
+                  {draft ? (
+                    <p className="text-[11px] truncate mt-0.5 text-amber-600 dark:text-amber-400 italic">
+                      Rascunho: {draft}
                     </p>
+                  ) : (
+                    lastText && (
+                      <p
+                        className={`text-[11px] truncate mt-0.5 ${room.unreadMessages > 0 || hasAlert ? 'text-slate-600 dark:text-slate-300' : 'text-slate-400 dark:text-slate-400'}`}
+                      >
+                        {lastName ? `${lastName}: ` : ''}
+                        {lastText}
+                      </p>
+                    )
                   )}
                 </div>
                 {(room.unreadMessages > 0 || hasAlert) && (
@@ -5802,10 +6165,15 @@ export function TalkChat({
   useEffect(() => {
     const onChanged = () => {
       setAuthExpired(false);
-      qc.invalidateQueries({ queryKey: ['talk-me'] });
-      qc.invalidateQueries({ queryKey: ['talk-rooms'] });
-      qc.invalidateQueries({ queryKey: ['talk-messages'] });
-      qc.invalidateQueries({ queryKey: ['talk-redmine-match'] });
+      // Invalida TODA query 'talk-*' por predicado, não uma lista fixa — a lista
+      // fixa anterior (só talk-me/rooms/messages/redmine-match) deixava
+      // talk-user-statuses, talk-participants, talk-my-status e
+      // talk-search-users com dado da conta ANTERIOR por até 1min depois de
+      // trocar de conta (presença/"visto por" errados), e qualquer query nova
+      // que ganhasse o prefixo `talk-` no futuro cairia na mesma lacuna.
+      qc.invalidateQueries({
+        predicate: (q) => typeof q.queryKey[0] === 'string' && q.queryKey[0].startsWith('talk-'),
+      });
     };
     window.addEventListener(TALK_AUTH_CHANGED_EVENT, onChanged);
     return () => window.removeEventListener(TALK_AUTH_CHANGED_EVENT, onChanged);

@@ -102,6 +102,20 @@ router.delete(
   }),
 );
 
+// Monta o URI padrao otpauth:// lido por Google Authenticator, Authy, 1Password,
+// Bitwarden etc. O rotulo vai como "Bluemine:<conta>" para dar contexto no app.
+function otpauthUri({ name, secret }) {
+  const label = encodeURIComponent(`Bluemine:${name}`);
+  const params = new URLSearchParams({
+    secret: String(secret).replace(/\s/g, '').toUpperCase(),
+    issuer: 'Bluemine',
+    algorithm: 'SHA1',
+    digits: '6',
+    period: '30',
+  });
+  return `otpauth://totp/${label}?${params.toString()}`;
+}
+
 // ── TOTP ─────────────────────────────────────────────────────────────────────
 // Lista as contas com o código atual já calculado (a semente fica no servidor).
 router.get(
@@ -140,6 +154,21 @@ router.post(
     list.push({ id: crypto.randomUUID(), name, secret });
     setTotp(uid, list);
     res.json({ success: true });
+  }),
+);
+
+// Exportação: devolve o URI otpauth:// da conta para levar a outro dispositivo
+// (QR code / importação em app autenticador). É a ÚNICA rota que expõe a
+// semente — exige ação explícita do usuário e nunca é chamada em listagens.
+router.get(
+  '/secrets/totp/:id/export',
+  handle(async (req, res) => {
+    const uid = await uidOf(req, res);
+    if (!uid) return;
+    const account = getTotp(uid).find((a) => a.id === req.params.id);
+    if (!account) return res.status(404).json({ error: 'conta não encontrada' });
+    res.set('Cache-Control', 'no-store');
+    res.json({ name: account.name, secret: account.secret, uri: otpauthUri(account) });
   }),
 );
 

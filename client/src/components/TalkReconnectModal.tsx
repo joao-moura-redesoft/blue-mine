@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, MessageSquare, ExternalLink, Copy, Check, Loader2, AlertCircle } from 'lucide-react';
-import { getTalkAuth, getTalkAuthFailure } from '../api/talk';
+import { getTalkAuth, getTalkAuthFailure, TALK_AUTH_EXPIRED_EVENT } from '../api/talk';
 import { useTalkLoginFlow } from '../hooks/useTalkLoginFlow';
 
 /**
@@ -21,7 +21,17 @@ export function TalkReconnectModal({
   onOpenSettings?: () => void;
 }) {
   const current = getTalkAuth();
-  const failure = getTalkAuthFailure();
+  // Lido como valor estático antes, então um 401 que chegasse DEPOIS do modal já
+  // aberto (ex.: primeiro erro genérico abriu o modal, uma chamada seguinte
+  // revela que na verdade é a sessão do Bluemine) deixava o ramo errado na tela
+  // até um remount. `TALK_AUTH_EXPIRED_EVENT` dispara a cada 401 do Talk (ver
+  // interceptor em api/talk.ts) — reassina o motivo sempre que ele chegar.
+  const [failure, setFailure] = useState(getTalkAuthFailure);
+  useEffect(() => {
+    const onExpired = () => setFailure(getTalkAuthFailure());
+    window.addEventListener(TALK_AUTH_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(TALK_AUTH_EXPIRED_EVENT, onExpired);
+  }, []);
   const [url, setUrl] = useState(current?.url ?? '');
   const [copied, setCopied] = useState(false);
 

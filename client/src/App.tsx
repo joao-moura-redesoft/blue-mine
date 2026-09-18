@@ -35,7 +35,7 @@ import { useSnoozeReminders } from './hooks/useSnoozeReminders';
 import { useWaitingReminders } from './hooks/useWaitingReminders';
 import { useBrowserNotifications } from './hooks/useBrowserNotifications';
 import { useTalkNotifications } from './hooks/useTalkNotifications';
-import { useCreateRoom } from './hooks/useTalk';
+import { useCreateRoom, useTalkRoomsStream } from './hooks/useTalk';
 import { useTheme } from './hooks/useTheme';
 import { useShortcuts } from './hooks/useShortcuts';
 import { PersonAvatar } from './components/PersonAvatar';
@@ -43,6 +43,7 @@ import { UpdateBanner } from './components/UpdateBanner';
 import { FocusWidget } from './components/FocusWidget';
 import type { NotePatch } from './api/notes';
 import { mailApi } from './api/mail';
+import * as mailUnreadGuard from './utils/mailUnreadGuard';
 import { isMailAvailable } from './utils/mailConfig';
 import {
   LayoutGrid,
@@ -242,6 +243,23 @@ type Tab =
 // Views de analytics agrupadas no submenu "Dashboards" da barra lateral.
 const DASHBOARD_IDS: Tab[] = ['dashboard', 'me', 'flow', 'trends', 'sla', 'project'];
 
+/**
+ * Rotas cujo conteúdo é filtrado por `selectedProject` — todas mostram o
+ * seletor da topbar.
+ *
+ * Ele aparecia só no Kanban e no Fluxo, mas Tendências, Prazos & SLA e
+ * Calendário recebem o mesmo `selectedProject`: quem escolhia um projeto na
+ * board e navegava para lá via números silenciosamente filtrados, sem nada na
+ * tela dizendo isso nem como voltar para "todos". No Calendário o sintoma era
+ * pior — as opções do filtro interno saem das tarefas já carregadas, então
+ * restringir pela topbar fazia o seletor de projeto de lá sumir junto.
+ *
+ * /project fica de fora de propósito: o ProjectView tem seletor próprio porque
+ * exige um projeto específico (não existe "todos os projetos" ali), e dois
+ * controles na mesma tela competiriam.
+ */
+const PROJECT_SCOPED_ROUTES = ['/kanban', '/flow', '/trends', '/sla', '/calendar'];
+
 // Placeholder enquanto o chunk da rota chega. Reusa o skeleton de lista por ser
 // o formato mais comum entre as views; serve só para o layout não colapsar.
 function RouteFallback() {
@@ -313,13 +331,27 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   // Modal de tarefa dirigido pela URL (?issue=123)
   const issueParam = searchParams.get('issue');
   const selectedIssueId = issueParam ? Number(issueParam) : null;
+  // Trilha de tarefas visitadas DENTRO do modal (referência #123, subtarefa,
+  // relacionada). Não é o histórico do navegador — esse continua servindo para
+  // fechar o modal e voltar pra view de trás.
+  // Espelhada em ref porque empilhar/desempilhar lê o valor atual: dois
+  // cliques no mesmo tick com closure velha comeriam um passo da trilha.
+  const [issueTrail, setIssueTrail] = useState<number[]>([]);
+  const trailRef = useRef<number[]>([]);
+  const setTrail = (next: number[]) => {
+    trailRef.current = next;
+    setIssueTrail(next);
+  };
   // push → o botão Voltar fecha o modal mantendo a view atrás
-  const openIssue = (id: number) =>
+  const openIssue = (id: number) => {
+    setTrail([]); // abrir pela board/busca começa uma trilha nova
     setSearchParams((prev) => {
       prev.set('issue', String(id));
       return prev;
     });
-  const closeIssue = () =>
+  };
+  const closeIssue = () => {
+    setTrail([]);
     setSearchParams(
       (prev) => {
         prev.delete('issue');
@@ -327,8 +359,12 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
       },
       { replace: true },
     );
-  // Navegar entre tarefas dentro do modal não empilha histórico
-  const navigateIssue = (id: number) =>
+  };
+  // Navegar entre tarefas dentro do modal não empilha histórico do navegador —
+  // empilha a trilha, para o botão "voltar" do próprio modal.
+  const navigateIssue = (id: number) => {
+    if (id === selectedIssueId) return;
+    if (selectedIssueId) setTrail([...trailRef.current, selectedIssueId]);
     setSearchParams(
       (prev) => {
         prev.set('issue', String(id));
@@ -336,6 +372,20 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
       },
       { replace: true },
     );
+  };
+  const backIssue = () => {
+    const trail = trailRef.current;
+    const prevId = trail[trail.length - 1];
+    if (!prevId) return;
+    setTrail(trail.slice(0, -1));
+    setSearchParams(
+      (prev) => {
+        prev.set('issue', String(prevId));
+        return prev;
+      },
+      { replace: true },
+    );
+  };
 
   const [showNotifications, setShowNotifications] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -411,6 +461,9 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   // varre o Redmine para o Web Push e agora avisa em vez de o cliente varrer de
   // novo por conta própria.
   useIssueStream(true);
+  // Mesmo canal, para o Talk: avisa a lista de salas quando qualquer conversa
+  // muda, em vez de esperar o poll de 15s (ver useTalkRoomsStream).
+  useTalkRoomsStream(true);
   const monitored = useMonitoredIssues();
   const authored = useAuthoredIssues();
   const watched = useWatchedIssues();
@@ -423,6 +476,12 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
     enabled: isMailAvailable(),
     refetchInterval: 2 * 60_000,
     refetchIntervalInBackground: true,
+    // O contador da Inbox no Zimbra propaga com atraso em relação à leitura da
+    // mensagem (até alguns minutos) — sem isso, focar a aba logo após ler um
+    // e-mail (ex.: clique numa notificação do SO) dispara um refetch que ainda
+    // pega o valor antigo e faz o sino "esquecer" que o e-mail foi lido.
+    refetchOnWindowFocus: false,
+    select: (data) => ({ ...data, unread: mailUnreadGuard.guard(data.unread) }),
   });
   const workflowNotifyEvents = useQuery({
     queryKey: ['workflows', 'notifications'],
@@ -927,15 +986,43 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
             <GlobalSearch onSelectIssue={openIssue} />
           </div>
 
-          {/* Project selector (Kanban e Fluxo) */}
-          {(location.pathname === '/kanban' || location.pathname === '/flow') && (
+          {/* Seletor de projeto — em todas as rotas que ele filtra (ver PROJECT_SCOPED_ROUTES) */}
+          {PROJECT_SCOPED_ROUTES.includes(location.pathname) && (
             <div className="relative flex-shrink-0">
               <button
                 onClick={() => setShowProjectMenu(!showProjectMenu)}
-                className="flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 px-3 py-1.5 rounded-lg transition-colors max-w-44 truncate"
+                title={
+                  selectedProject
+                    ? `Mostrando só "${selectedProjectName}" — clique para trocar de projeto`
+                    : 'Filtrar por projeto'
+                }
+                /* Estado ativo destacado: neutro nos dois casos, um filtro em
+                   vigor passava despercebido no meio da barra. Mesma linguagem
+                   dos chips de versão/prioridade do Kanban. */
+                className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border transition-colors max-w-52 ${
+                  selectedProject
+                    ? 'bg-indigo-50 border-indigo-300 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-300'
+                    : 'bg-slate-100 border-transparent text-slate-600 hover:bg-slate-200 hover:text-slate-900 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100'
+                }`}
               >
+                <FolderKanban size={13} className="flex-shrink-0" />
                 <span className="truncate">{selectedProjectName}</span>
-                <ChevronDown size={14} className="flex-shrink-0" />
+                {selectedProject ? (
+                  <span
+                    role="button"
+                    aria-label="Ver todos os projetos"
+                    title="Ver todos os projetos"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedProject(undefined);
+                    }}
+                    className="text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-200 flex-shrink-0"
+                  >
+                    <X size={12} />
+                  </span>
+                ) : (
+                  <ChevronDown size={14} className="flex-shrink-0" />
+                )}
               </button>
               {showProjectMenu && (
                 <div className="absolute right-0 top-full mt-1 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border border-slate-200/80 dark:border-slate-700/70 rounded-lg shadow-xl shadow-slate-900/5 z-20 min-w-52 py-1 max-h-80 overflow-y-auto scrollbar-thin">
@@ -1360,6 +1447,8 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
           issueId={selectedIssueId}
           onClose={closeIssue}
           onNavigate={navigateIssue}
+          onBack={issueTrail.length > 0 ? backIssue : undefined}
+          backToId={issueTrail[issueTrail.length - 1]}
           onNewNote={(patch) => {
             closeIssue();
             openNewNote(patch);

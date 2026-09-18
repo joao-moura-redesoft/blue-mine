@@ -7,10 +7,10 @@ const handle = require('../lib/handle');
 const { makeTalk } = require('../services/talk');
 const { getMatches: getTalkMatches } = require('../services/talkMatch');
 const { makeRedmine, getMyUserId } = require('../lib/redmine');
-const { saveTalkAuth, clearTalkAuth, getTalkAuth } = require('../services/talkStore');
+const { saveTalkAuth, clearTalkAuth } = require('../services/talkStore');
 const { safeAgents } = require('../lib/ssrfGuard');
-const { getInternalCaAgent } = require('../lib/internalCa');
 const AppError = require('../lib/AppError');
+const talkEvents = require('../services/talkEvents');
 
 // Valida que uma URL é http(s) e bem-formada antes de o servidor buscá-la.
 // Combinado com safeAgents (bloqueio de IPs internos), fecha o vetor de SSRF
@@ -28,12 +28,44 @@ function assertPublicHttpUrl(value) {
   return u;
 }
 
-// Resolve a conta do Talk (url, user, token) a partir do uid do Redmine logado.
-// Substitui os antigos headers x-nextcloud-* enviados pelo cliente.
-async function talkAccount(req) {
-  const uid = await getMyUserId(req);
-  return getTalkAuth(uid) || {};
+// Confere que a credencial (url+user+token) realmente autentica no Nextcloud
+// ANTES de persistir no vault — usado tanto pelo vínculo manual (/talk/auth)
+// quanto pelo Login Flow v2, cujo poll devolvia sucesso e só descobria uma
+// credencial ruim (revogada entre o servidor emitir e o poll consumir, ou
+// qualquer outra falha transitória) no primeiro /talk/rooms do cliente — atrás
+// do circuit breaker, o que fazia a reconexão parecer travada por vários
+// segundos sem nenhum feedback de erro.
+async function validateTalkCredential(url, user, token) {
+  assertPublicHttpUrl(url);
+  const client = axios.create({
+    baseURL: String(url).replace(/\/$/, ''),
+    auth: { username: user, password: token },
+    headers: { 'OCS-APIRequest': 'true', Accept: 'application/json' },
+    timeout: 8000,
+    ...safeAgents(), // também carrega a CA interna (ver ssrfGuard.js)
+  });
+  await client.get('/ocs/v2.php/cloud/user?format=json');
 }
+
+// Sanitiza um path de arquivo do Nextcloud (messageParameters.file.path) antes
+// de entrar cru numa URL de WebDAV: bloqueia travessia de diretório e escapa
+// cada segmento — sem isso, um `?`/`#`/espaço no nome do arquivo poderia
+// injetar query params ou truncar a URL. Devolve null se o path for inválido
+// (o chamador deve tratar como "path ausente", não abortar a requisição toda —
+// ainda existe o fallback por fileId/preview).
+function sanitizeWebdavPath(filePath) {
+  if (typeof filePath !== 'string' || !filePath || filePath.includes('..')) return null;
+  const segments = filePath.split('/').filter(Boolean);
+  if (segments.length === 0) return null;
+  return segments.map((seg) => encodeURIComponent(seg)).join('/');
+}
+
+// Cliente sem credenciais para as URLs de "direct download" que a NC devolve
+// (fileId assinado, sem auth) em file-preview/file-download. Precisa do MESMO
+// safeAgents() do client autenticado (`talk`) — a ameaça (SSRF via um endpoint
+// controlado pelos dados da NC) é a mesma, e usar `axios` puro aqui era o único
+// lugar do arquivo que escapava dessa proteção.
+const publicDownloadClient = axios.create({ timeout: 15000, ...safeAgents() });
 
 // =========================================================================
 // NEXTCLOUD LOGIN FLOW v2
@@ -74,11 +106,34 @@ router.post(
       });
 
       const uid = await getMyUserId(req);
-      if (!uid) throw Object.assign(new Error('Redmine não autenticado'), { statusCode: 401 });
+      if (!uid) throw new AppError(401, 'Redmine não autenticado');
 
-      saveTalkAuth(uid, { url: data.server, user: data.loginName, token: data.appPassword });
+      // Ver validateTalkCredential: confirma que a credencial devolvida pelo NC
+      // realmente funciona antes de persistir, em vez de deixar o cliente
+      // descobrir isso sozinho no primeiro /talk/rooms. Só rejeita num 401/403
+      // CLARO da NC (prova de que a credencial não funciona) — um timeout/5xx
+      // nesta chamada extra é inconclusivo, e descartar aqui jogaria fora uma
+      // senha de app que a NC acabou de emitir só porque a validação teve um
+      // problema de rede passageiro, obrigando o usuário a refazer o login
+      // inteiro. Nesse caso salva mesmo assim; se a credencial for realmente
+      // ruim, o disjuntor do cliente pega no primeiro /talk/rooms.
+      try {
+        await validateTalkCredential(data.server, data.loginName, data.appPassword);
+      } catch (e) {
+        if (e instanceof AppError) throw e; // URL inválida devolvida pela NC — deveria ser impossível, mas não some
+        const status = e.response?.status;
+        if (status === 401 || status === 403) {
+          throw new AppError(
+            401,
+            'O Nextcloud devolveu uma credencial que não funcionou. Tente novamente.',
+          );
+        }
+      }
 
-      res.json({ done: true, server: data.server, user: data.loginName });
+      const cleanUrl = String(data.server).replace(/\/$/, '');
+      saveTalkAuth(uid, { url: cleanUrl, user: data.loginName, token: data.appPassword });
+
+      res.json({ done: true, server: cleanUrl, user: data.loginName });
     } catch (e) {
       // 404 = ainda aguardando o usuário fazer login
       if (e.response?.status === 404) return res.json({ done: false });
@@ -100,18 +155,14 @@ router.post(
     if (!uid) return res.status(401).json({ error: 'Redmine não autenticado' });
 
     try {
-      const client = axios.create({
-        baseURL: url.replace(/\/$/, ''),
-        auth: { username: user, password: token },
-        headers: { 'OCS-APIRequest': 'true', Accept: 'application/json' },
-        ...(getInternalCaAgent() ? { httpsAgent: getInternalCaAgent() } : {}),
-      });
-      await client.get('/ocs/v2.php/cloud/user?format=json');
-    } catch {
+      await validateTalkCredential(url, user, token);
+    } catch (e) {
+      if (e instanceof AppError) throw e; // URL malformada/não-http — mensagem específica
       return res.status(401).json({ error: 'Credenciais do Talk inválidas' });
     }
 
-    saveTalkAuth(uid, { url: url.replace(/\/$/, ''), user, token });
+    const cleanUrl = url.replace(/\/$/, '');
+    saveTalkAuth(uid, { url: cleanUrl, user, token });
     res.json({ success: true });
   }),
 );
@@ -241,7 +292,7 @@ router.post(
 
 router.post(
   '/talk/rooms/:token/upload',
-  express.raw({ type: '*/*', limit: '100mb' }),
+  express.raw({ type: '*/*', limit: '500mb' }),
   handle(async (req, res) => {
     const filename = decodeURIComponent(req.headers['x-filename'] || `upload_${Date.now()}`);
     const ct = req.headers['x-content-type'] || 'application/octet-stream';
@@ -256,11 +307,13 @@ router.post(
     }
 
     const OCS_TIMEOUT = 8000;
-    const ncUrl = (await talkAccount(req)).url || '';
+    // Reaproveita o client que makeTalk já criou em vez de refazer o lookup
+    // uid→credencial (getMyUserId + getTalkAuth) uma segunda vez.
+    const ncUrl = talk.defaults.baseURL || '';
     const putOpts = {
       headers: { 'Content-Type': ct, 'Content-Length': body.length },
-      maxBodyLength: 100 * 1024 * 1024,
-      maxContentLength: 100 * 1024 * 1024,
+      maxBodyLength: 500 * 1024 * 1024,
+      maxContentLength: 500 * 1024 * 1024,
     };
 
     // Subpasta única dentro de /Talk: evita conflito de nome (clipboard manda sempre
@@ -361,15 +414,18 @@ router.get(
 router.get(
   '/talk/file-preview',
   handle(async (req, res) => {
-    const { fileId, path: filePath, actorId } = req.query;
-    const user = (await talkAccount(req)).user;
+    const { fileId, path: rawPath, actorId } = req.query;
     const talk = await makeTalk(req);
-    const ext = (filePath || '').split('.').pop()?.toLowerCase() || 'jpg';
+    // Reaproveita as credenciais já resolvidas por makeTalk em vez de repetir
+    // o lookup uid→conta (getMyUserId + getTalkAuth).
+    const user = talk.defaults.auth?.username || '';
+    const filePath = sanitizeWebdavPath(rawPath); // null se ausente/inválido — cai nos fallbacks por fileId
+    const ext = (rawPath || '').split('.').pop()?.toLowerCase() || 'jpg';
     const fallbackCt = `image/${ext === 'jpg' ? 'jpeg' : ext}`;
 
     const tryDownload = async (url, useAuth = true) => {
       try {
-        const client = useAuth ? talk : axios;
+        const client = useAuth ? talk : publicDownloadClient;
         const r = await client.get(url, { responseType: 'arraybuffer', maxRedirects: 5 });
         const ct = String(r.headers['content-type'] || '');
         if (
@@ -427,16 +483,17 @@ router.get(
 router.get(
   '/talk/file-download',
   handle(async (req, res) => {
-    const { fileId, path: filePath, actorId } = req.query;
-    const user = (await talkAccount(req)).user;
+    const { fileId, path: rawPath, actorId } = req.query;
     const talk = await makeTalk(req);
+    const user = talk.defaults.auth?.username || '';
+    const filePath = sanitizeWebdavPath(rawPath);
     const filename = req.query.name
       ? decodeURIComponent(req.query.name)
-      : (filePath || '').split('/').pop() || `arquivo_${fileId}`;
+      : (rawPath || '').split('/').pop() || `arquivo_${fileId}`;
 
     const tryDownload = async (url, useAuth = true) => {
       try {
-        const client = useAuth ? talk : axios;
+        const client = useAuth ? talk : publicDownloadClient;
         const r = await client.get(url, { responseType: 'arraybuffer', maxRedirects: 5 });
         const ct = String(r.headers['content-type'] || '');
         if (r.data?.byteLength > 0 && !ct.includes('text/html')) {
@@ -907,6 +964,41 @@ router.get(
   }),
 );
 
+// SSE de invalidação — avisa a janela aberta que ALGUMA sala do Talk mudou
+// (mensagem nova em qualquer conversa, não só a aberta), para ela rebuscar a
+// lista de salas na hora em vez de esperar o próprio poll de 15-30s. Alimentado
+// pelo mesmo poll do servidor (services/push.js:pollTalkGroup) que já varre o
+// Talk a cada 3-12s para a telinha do K86 e o Web Push — sem isto, a aba
+// aberta descobria a mesma mensagem visivelmente depois do teclado.
+// Mesmo padrão do /issues/stream (services/issueEvents.js): manda invalidação,
+// não dados — a lista de salas continua sendo buscada pela rota do cliente.
+router.get(
+  '/talk/stream',
+  handle(async (req, res) => {
+    const uid = await getMyUserId(req);
+    if (!uid) return res.status(401).end();
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+    res.write(': conectado\n\n');
+
+    const unsubscribe = talkEvents.subscribe(uid, (payload) => {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    });
+
+    // Comentário periódico: mantém o socket vivo através de proxies e faz o
+    // EventSource perceber a queda (ele só reconecta ao ver o stream morrer).
+    const keepAlive = setInterval(() => res.write(': ping\n\n'), 25_000);
+
+    req.on('close', () => {
+      clearInterval(keepAlive);
+      unsubscribe();
+    });
+  }),
+);
+
 // SSE — proxy do long-poll do Talk para updates em tempo real.
 // Como o EventSource trafega o cookie session_id (withCredentials: true),
 // a authMiddleware do Redmine injeta os headers, permitindo usar makeTalk.
@@ -927,6 +1019,10 @@ router.get(
 
     let lastId = parseInt(req.query.lastKnownMessageId) || 0;
     let active = true;
+    // Sem isto, trocar de sala rápido (ou fechar a aba) deixava o long-poll de
+    // até 35s ainda rodando servidor→Nextcloud depois que o cliente já tinha ido
+    // embora — `active=false` só impedia o próximo ciclo, não cancelava o atual.
+    const abortController = new AbortController();
 
     (async () => {
       while (active) {
@@ -943,6 +1039,7 @@ router.get(
                 includeLastKnown: 0,
               },
               timeout: 35_000,
+              signal: abortController.signal,
             },
           );
           const messages = data?.ocs?.data ?? [];
@@ -963,14 +1060,27 @@ router.get(
         } catch (err) {
           if (!active) break;
           if (err.code === 'ECONNABORTED' || err.response?.status === 304) continue;
-          console.warn('[sse] erro no poll Talk:', err.response?.status || err.message);
+          const status = err.response?.status;
+          // Token do Nextcloud revogado a meio do stream: continuar tentando a
+          // cada 5s escondia o problema — o cliente via "Conectado" para sempre
+          // (o `onopen` do EventSource já tinha disparado) enquanto o stream real
+          // estava morto. Avisa e encerra: o cliente cai no fallback REST (30s),
+          // que passa pelo interceptor do axios e aciona o aviso de reconexão.
+          if (status === 401 || status === 403) {
+            res.write(`data: ${JSON.stringify({ type: 'auth-error' })}\n\n`);
+            break;
+          }
+          console.warn('[sse] erro no poll Talk:', status || err.message);
           await new Promise((r) => setTimeout(r, 5000));
         }
       }
+      active = false;
+      res.end();
     })();
 
     req.on('close', () => {
       active = false;
+      abortController.abort();
     });
   }),
 );

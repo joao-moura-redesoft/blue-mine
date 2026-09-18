@@ -12,6 +12,7 @@ import {
 import {
   Plus,
   RefreshCw,
+  Eye,
   EyeOff,
   Search,
   AlertTriangle,
@@ -31,7 +32,7 @@ import {
   Palette,
   Layers,
   Gauge,
-  User,
+  FolderKanban,
 } from 'lucide-react';
 import {
   SortableContext,
@@ -46,6 +47,8 @@ import {
   useUpdateIssueStatus,
   useProjectVersions,
   useVersionIssues,
+  usePriorities,
+  useIssuesMeta,
 } from '../hooks/useRedmine';
 import { useTimer } from '../hooks/useTimer';
 import type { Version } from '../types/redmine';
@@ -67,13 +70,17 @@ const CreateIssueModal = lazy(() =>
 );
 
 type SortBy = 'priority' | 'due_date' | 'updated';
-type GroupBy = 'none' | 'assignee' | 'priority';
+// O board só carrega tarefas com assigned_to_id=me, então agrupar por responsável
+// rendia sempre uma raia só. Projeto é o corte que realmente separa as tarefas.
+type GroupBy = 'none' | 'project' | 'priority';
 
 const GROUP_LABELS: Record<GroupBy, string> = {
   none: 'Não agrupar',
-  assignee: 'Responsável',
+  project: 'Projeto',
   priority: 'Prioridade',
 };
+
+const NO_PROJECT = 'Sem projeto';
 
 const PRIORITY_ORDER: Record<string, number> = {
   Imediata: 0,
@@ -237,8 +244,10 @@ function StatsBar({
   const withMissing = issues.filter((i) => getMissingFields(i).length > 0);
 
   const chip = (id: string, icon: React.ReactNode, label: string, count: number, color: string) => {
-    if (count === 0) return null;
     const active = activeFilter === id;
+    // Chip zerado some — menos o que está filtrando: sumir com ele deixava o
+    // board vazio sem nada na tela explicando (nem como desfazer).
+    if (count === 0 && !active) return null;
     return (
       <button
         onClick={() => onFilter(active ? null : id)}
@@ -255,7 +264,12 @@ function StatsBar({
     );
   };
 
-  const hasAny = overdue.length || reviewToday.length || reviewOverdue.length || withMissing.length;
+  const hasAny =
+    overdue.length ||
+    reviewToday.length ||
+    reviewOverdue.length ||
+    withMissing.length ||
+    activeFilter;
   if (!hasAny) return null;
 
   return (
@@ -489,7 +503,8 @@ function KanbanColumn({
   const customTheme = customColorKey ? CUSTOM_COLORS[customColorKey] : null;
   const fallbackBorder = COL_COLORS[status.name] ?? 'border-t-slate-400';
   const [archivedOpen, setArchivedOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(status.is_closed);
+  // Colunas fechadas só aparecem quando o usuário pede: nasce expandida.
+  const [collapsed, setCollapsed] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
   const colorBtnRef = useRef<HTMLButtonElement>(null);
   const [colorCoords, setColorCoords] = useState({ top: 0, left: 0 });
@@ -819,14 +834,18 @@ export function KanbanBoard({
   onProjectChange,
 }: Props) {
   const { data: allStatuses } = useStatuses();
+  const { data: priorities } = usePriorities();
   const { data: issues, isLoading, refetch, isFetching } = useIssues(projectId);
+  const issuesMeta = useIssuesMeta();
   const updateStatus = useUpdateIssueStatus();
   const timer = useTimer();
 
   const [showCreate, setShowCreate] = useState(false);
   const [dragError, setDragError] = useState<string | null>(null);
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
-  const [hiddenStatuses, setHiddenStatuses] = useState<Set<number>>(new Set());
+  // Colunas de status fechado (Fechado/Cancelado…) ficam fora do board por padrão;
+  // só entram nas que o usuário pedir explicitamente pelos botões "Mostrar".
+  const [shownClosedStatuses, setShownClosedStatuses] = useState<Set<number>>(new Set());
   const [columnColors, setColumnColors] = useState<Record<number, string>>(() => {
     try {
       const saved = localStorage.getItem('kanban-column-colors');
@@ -871,9 +890,11 @@ export function KanbanBoard({
     } catch {}
     return {};
   });
-  const [groupBy, setGroupBy] = useState<GroupBy>(
-    () => (localStorage.getItem('kanban-group-by') as GroupBy) || 'none',
-  );
+  const [groupBy, setGroupBy] = useState<GroupBy>(() => {
+    // Valores antigos (ex.: 'assignee', removido) caem em 'none'.
+    const saved = localStorage.getItem('kanban-group-by');
+    return saved === 'project' || saved === 'priority' ? saved : 'none';
+  });
   const [groupOpen, setGroupOpen] = useState(false);
   const [priorityFilter, setPriorityFilter] = useState('');
   const [priorityOpen, setPriorityOpen] = useState(false);
@@ -999,10 +1020,15 @@ export function KanbanBoard({
     });
   }, []);
 
+  // Aplicar um atalho salvo tem que deixar a tela exatamente no estado salvo:
+  // busca e versão sobrando de antes davam a impressão de filtro quebrado.
   const applyFilter = (f: SavedFilter) => {
     setSortBy(f.sortBy);
     setPriorityFilter(f.priorityFilter);
     setActiveFilter(f.alertFilter);
+    setSearch('');
+    setSelectedVersionId(undefined);
+    changeGroupBy(f.groupBy ?? 'none');
     if (onProjectChange) onProjectChange(f.projectId);
   };
 
@@ -1059,8 +1085,14 @@ export function KanbanBoard({
     let list = issues;
 
     if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      list = list.filter((i) => i.subject.toLowerCase().includes(q) || String(i.id).includes(q));
+      // "#123" é como as tarefas aparecem em todo lugar — aceitar com e sem "#".
+      const q = search.trim().toLowerCase().replace(/^#/, '');
+      list = list.filter(
+        (i) =>
+          i.subject.toLowerCase().includes(q) ||
+          String(i.id).includes(q) ||
+          i.project.name.toLowerCase().includes(q),
+      );
     }
 
     if (priorityFilter) {
@@ -1097,7 +1129,9 @@ export function KanbanBoard({
       activeFilter || search ? new Set(issues?.map((i) => i.status.id) ?? []) : usedIds;
 
     const visible = allStatuses.filter(
-      (s) => !hiddenStatuses.has(s.id) && (baseIds.has(s.id) || pinnedStatuses.has(s.id)),
+      (s) =>
+        (!s.is_closed || shownClosedStatuses.has(s.id)) &&
+        (baseIds.has(s.id) || pinnedStatuses.has(s.id)),
     );
 
     // Ordenar de acordo com columnOrder
@@ -1116,12 +1150,46 @@ export function KanbanBoard({
     allStatuses,
     filteredIssues,
     issues,
-    hiddenStatuses,
+    shownClosedStatuses,
     pinnedStatuses,
     activeFilter,
     search,
     columnOrder,
   ]);
+
+  // Prioridades reais do Redmine (a lista era fixa e escondia prioridades
+  // customizadas); ordenadas do mais urgente pro menos.
+  const priorityOptions = useMemo(() => {
+    const names = (priorities ?? []).map((p) => p.name);
+    const list = names.length ? names : Object.keys(PRIORITY_ORDER);
+    return [...list].sort((a, b) => (PRIORITY_ORDER[a] ?? 5) - (PRIORITY_ORDER[b] ?? 5));
+  }, [priorities]);
+
+  // Quantos filtros estão restringindo a lista agora (agrupamento e ordenação
+  // não contam: mudam a arrumação, não o que aparece).
+  const activeFilterCount =
+    (search.trim() ? 1 : 0) +
+    (priorityFilter ? 1 : 0) +
+    (activeFilter ? 1 : 0) +
+    (selectedVersionId ? 1 : 0);
+
+  const clearFilters = useCallback(() => {
+    setSearch('');
+    setPriorityFilter('');
+    setActiveFilter(null);
+    setSelectedVersionId(undefined);
+  }, []);
+
+  // Colunas fechadas que existem nas tarefas carregadas — viram botões de
+  // "Mostrar"/"Ocultar" na barra de ferramentas.
+  const closedStatusOptions = useMemo(() => {
+    if (!allStatuses || !issues) return [];
+    const counts = new Map<number, number>();
+    issues.forEach((i) => counts.set(i.status.id, (counts.get(i.status.id) ?? 0) + 1));
+    return allStatuses
+      .filter((s) => s.is_closed && counts.has(s.id))
+      .map((s) => ({ id: s.id, name: s.name, count: counts.get(s.id) ?? 0 }));
+  }, [allStatuses, issues]);
 
   const issuesByStatus = useMemo(() => {
     const map = new Map<number, Issue[]>();
@@ -1136,11 +1204,20 @@ export function KanbanBoard({
     return map;
   }, [filteredIssues, visibleStatuses, sortBy, archivedIds]);
 
+  // Quantos cards estão de fato no board: fora as arquivadas e as que caem em
+  // colunas não visíveis (fechadas/canceladas). O contador do cabeçalho mostrava
+  // o total filtrado, que incluía tarefas que ninguém via na tela.
+  const boardCount = useMemo(() => {
+    let n = 0;
+    issuesByStatus.forEach((list) => (n += list.length));
+    return n;
+  }, [issuesByStatus]);
+
   // Swimlanes: agrupa as tarefas ativas por responsável ou prioridade, mantendo
   // as mesmas colunas de status dentro de cada raia. null = visão normal.
   const laneKeyOf = useCallback(
     (i: Issue) => {
-      if (groupBy === 'assignee') return i.assigned_to?.name ?? 'Sem responsável';
+      if (groupBy === 'project') return i.project?.name ?? NO_PROJECT;
       if (groupBy === 'priority') return i.priority.name;
       return '';
     },
@@ -1154,9 +1231,7 @@ export function KanbanBoard({
     if (groupBy === 'priority') {
       keys.sort((a, b) => (PRIORITY_ORDER[a] ?? 5) - (PRIORITY_ORDER[b] ?? 5));
     } else {
-      keys.sort((a, b) =>
-        a === 'Sem responsável' ? 1 : b === 'Sem responsável' ? -1 : a.localeCompare(b),
-      );
+      keys.sort((a, b) => (a === NO_PROJECT ? 1 : b === NO_PROJECT ? -1 : a.localeCompare(b)));
     }
     return keys.map((key) => {
       const byStatus = new Map<number, Issue[]>();
@@ -1360,10 +1435,28 @@ export function KanbanBoard({
               <span className="text-slate-400 font-normal ml-1 text-base">— {userName}</span>
             )}
           </h1>
-          <span className="text-sm text-slate-400 whitespace-nowrap">
-            ({filteredIssues.length}
-            {filteredIssues.length !== (issues?.length ?? 0) ? `/${issues?.length}` : ''})
+          <span
+            className="text-sm text-slate-400 whitespace-nowrap"
+            title={
+              boardCount !== (issues?.length ?? 0)
+                ? `${boardCount} no board de ${issues?.length ?? 0} atribuídas a você (o resto está filtrado, arquivado ou em coluna oculta)`
+                : undefined
+            }
+          >
+            ({boardCount}
+            {boardCount !== (issues?.length ?? 0) ? `/${issues?.length}` : ''})
           </span>
+
+          {activeFilterCount > 0 && (
+            <button
+              onClick={clearFilters}
+              title="Remover busca, prioridade, versão e alerta"
+              className="flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors whitespace-nowrap"
+            >
+              <X size={11} />
+              Limpar filtros ({activeFilterCount})
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -1378,7 +1471,13 @@ export function KanbanBoard({
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar… (/ para focar)"
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setSearch('');
+                  e.currentTarget.blur();
+                }
+              }}
+              placeholder="Buscar nº, título ou projeto… (/)"
               className="pl-8 pr-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent w-52 bg-white"
             />
             {search && (
@@ -1409,25 +1508,33 @@ export function KanbanBoard({
             ))}
           </div>
 
-          {/* Ocultar colunas fechadas visíveis */}
-          {visibleStatuses
-            .filter((s) => allStatuses?.find((a) => a.id === s.id)?.is_closed)
-            .map((s) => (
+          {/* Mostrar/ocultar colunas de status fechado (ocultas por padrão) */}
+          {closedStatusOptions.map((s) => {
+            const shown = shownClosedStatuses.has(s.id);
+            return (
               <button
                 key={s.id}
                 onClick={() =>
-                  setHiddenStatuses((prev) => {
+                  setShownClosedStatuses((prev) => {
                     const n = new Set(prev);
-                    n.add(s.id);
+                    if (shown) n.delete(s.id);
+                    else n.add(s.id);
                     return n;
                   })
                 }
-                className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                title={shown ? `Ocultar coluna "${s.name}"` : `Mostrar coluna "${s.name}"`}
+                className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
+                  shown
+                    ? 'border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    : 'border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-100'
+                }`}
               >
-                <EyeOff size={12} />
-                Ocultar "{s.name}"
+                {shown ? <EyeOff size={12} /> : <Eye size={12} />}
+                {shown ? 'Ocultar' : 'Mostrar'} "{s.name}"
+                <span className="text-slate-400">({s.count})</span>
               </button>
-            ))}
+            );
+          })}
 
           <button
             onClick={() => refetch()}
@@ -1597,7 +1704,7 @@ export function KanbanBoard({
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setPriorityOpen(false)} />
                 <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 py-1 w-44">
-                  {['', 'Imediata', 'Urgente', 'Alta', 'Normal', 'Baixa'].map((p) => (
+                  {['', ...priorityOptions].map((p) => (
                     <button
                       key={p}
                       onClick={() => {
@@ -1653,14 +1760,14 @@ export function KanbanBoard({
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setGroupOpen(false)} />
                 <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 py-1 w-48">
-                  {(['none', 'assignee', 'priority'] as GroupBy[]).map((g) => (
+                  {(['none', 'project', 'priority'] as GroupBy[]).map((g) => (
                     <button
                       key={g}
                       onClick={() => changeGroupBy(g)}
                       className={`w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-blue-50 transition-colors ${groupBy === g ? 'text-blue-600 font-semibold' : 'text-slate-700'}`}
                     >
-                      {g === 'assignee' ? (
-                        <User size={13} />
+                      {g === 'project' ? (
+                        <FolderKanban size={13} />
                       ) : g === 'priority' ? (
                         <Flag size={13} />
                       ) : (
@@ -1699,7 +1806,7 @@ export function KanbanBoard({
 
       {/* Filtros salvos */}
       <SavedFiltersBar
-        currentFilter={{ projectId, sortBy, priorityFilter, alertFilter: activeFilter }}
+        currentFilter={{ projectId, sortBy, priorityFilter, alertFilter: activeFilter, groupBy }}
         onApply={applyFilter}
       />
 
@@ -1720,6 +1827,17 @@ export function KanbanBoard({
       {/* Stats / alertas clicáveis */}
       {issues && (
         <StatsBar issues={issues} activeFilter={activeFilter} onFilter={setActiveFilter} />
+      )}
+
+      {/* A busca bateu na trava do servidor: melhor dizer do que sumir calado */}
+      {issuesMeta.truncated && (
+        <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+          <AlertTriangle size={15} className="flex-shrink-0" />
+          <span>
+            Mostrando {issuesMeta.total} tarefas — o limite por busca foi atingido e há mais no
+            Redmine. Filtre por projeto para ver o resto.
+          </span>
+        </div>
       )}
 
       {/* Erro de drag */}
@@ -1747,8 +1865,8 @@ export function KanbanBoard({
             {lanes.map((lane) => (
               <div key={lane.key} className="flex-shrink-0">
                 <div className="flex items-center gap-2 mb-2 sticky left-0">
-                  {groupBy === 'assignee' ? (
-                    <User size={14} className="text-violet-500" />
+                  {groupBy === 'project' ? (
+                    <FolderKanban size={14} className="text-violet-500" />
                   ) : (
                     <Flag size={14} className="text-violet-500" />
                   )}

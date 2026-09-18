@@ -15,6 +15,7 @@ const { REDMINE_CF, REDMINE_STATUS } = require('../lib/config');
 const { dataFile, readJsonSecure, writeJsonSecure } = require('../lib/secureStore');
 const keyboard = require('./keyboardNotify');
 const digest = require('./digest');
+const talkEvents = require('./talkEvents');
 
 // Tag/tipo do card na telinha do teclado (K86) por categoria de issue.
 const KB_ISSUE = {
@@ -428,9 +429,18 @@ async function pollTalkGroup({ auth, recs }) {
 
       if (lastMsgId) {
         for (const rec of recs) {
-          if (rec.talkSeen[room.token] !== lastMsgId) {
+          const prevSeen = rec.talkSeen[room.token];
+          if (prevSeen !== lastMsgId) {
             rec.talkSeen[room.token] = lastMsgId;
             changed = true;
+            // Avisa a aba aberta desse uid para rebuscar a lista de salas AGORA,
+            // em vez de esperar o próprio poll do cliente (15-30s) — o mesmo
+            // atraso que fazia o Talk aparecer na telinha do K86 antes da web.
+            // prevSeen === undefined é a primeira varredura desta sala pra este
+            // dispositivo (baseline, não mensagem nova de verdade): não emite.
+            if (prevSeen !== undefined && rec.uid) {
+              talkEvents.emit(rec.uid, { reason: 'poll', token: room.token });
+            }
           }
         }
       }

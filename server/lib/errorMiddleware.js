@@ -3,6 +3,16 @@ const { destroySession } = require('./session');
 
 const NETWORK_RE = /ECONNREFUSED|ETIMEDOUT|ENOTFOUND|ECONNRESET|EHOSTUNREACH/;
 
+// Falha de validação da cadeia TLS — quase sempre a CA corporativa ausente na
+// máquina (ver lib/internalCa.js). É acionável pelo usuário, então vale uma
+// mensagem própria em vez do "erro interno" genérico, que não diz o que fazer.
+const TLS_TRUST_RE =
+  /self[- ]signed certificate|unable to (verify|get local issuer)|DEPTH_ZERO_SELF_SIGNED_CERT|SELF_SIGNED_CERT|UNABLE_TO_VERIFY_LEAF_SIGNATURE|UNABLE_TO_GET_ISSUER_CERT/i;
+
+function isTlsTrustError(err) {
+  return TLS_TRUST_RE.test(`${err?.code || ''} ${err?.message || ''}`);
+}
+
 function sanitizeRedmineBody(data) {
   if (!data) return null;
   if (Array.isArray(data.errors)) return { errors: data.errors };
@@ -49,6 +59,12 @@ module.exports = function errorMiddleware(err, req, res, next) {
     detail: err.response?.data ?? err.message,
     stack: status >= 500 ? err.stack : undefined,
   });
+
+  if (isTlsTrustError(err))
+    return res.status(502).json({
+      error:
+        'Certificado do servidor não é confiável nesta máquina: falta a CA interna. Instale a CA corporativa no Windows ou coloque redmine-ca.pem na pasta do bluemine.exe.',
+    });
 
   if (status >= 500) return res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
 

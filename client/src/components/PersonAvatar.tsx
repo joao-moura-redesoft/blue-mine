@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import { useTalkMatchFor } from '../hooks/useTalk';
 import { getTalkAuth } from '../api/talk';
+import { useTalkBlobUrl } from '../hooks/useTalkBlobUrl';
 
 interface Props {
   redmineUserId?: number;
@@ -30,16 +31,24 @@ export function PersonAvatar({
   const auth = getTalkAuth();
   const pending = !!openingTalkFor && openingTalkFor === ncUid;
 
-  const { data: src } = useQuery({
+  // Mesma queryKey ['talk-avatar', ncUid, size] que TalkAvatar (TalkChat.tsx) usa pra
+  // essa MESMA pessoa (ex.: meu próprio avatar aqui na barra lateral e "meu status" no
+  // painel de conversas apontam pro mesmo ncUid) — o cache do React Query é compartilhado
+  // entre os dois componentes. Por isso o queryFn tem que devolver o mesmo formato (Blob)
+  // que TalkAvatar devolve: com um devolvendo Blob e o outro devolvendo a URL como string,
+  // um dos dois lia o dado do outro e tentava usar um Blob cru como `src` da <img>,
+  // renderizando o ícone de imagem quebrada.
+  const { data: blob } = useQuery({
     queryKey: ['talk-avatar', ncUid, size],
     queryFn: async () => {
       const r = await fetch(`/api/talk/avatar/${encodeURIComponent(ncUid!)}?size=${size}`);
       if (!r.ok) return null;
-      return URL.createObjectURL(await r.blob());
+      return r.blob();
     },
     enabled: !!auth && !!ncUid,
     staleTime: 10 * 60 * 1000,
   });
+  const src = useTalkBlobUrl(blob);
 
   const initials = name
     .split(' ')

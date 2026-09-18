@@ -147,7 +147,11 @@ export interface NCUser {
   source: string;
 }
 
-const api = axios.create({ baseURL: '/api/talk' });
+// Sem timeout, uma conexão travada (wifi/VPN instável) nunca rejeita — a query
+// fica presa em "carregando" para sempre, sem erro, sem acionar o disjuntor
+// nem o retry do React Query. Era um dos motivos da tela de conversas ficar em
+// branco sem feedback depois de reconectar numa rede ruim.
+const api = axios.create({ baseURL: '/api/talk', timeout: 20_000 });
 
 // Disparado quando o servidor responde 401 a uma chamada do Talk. 403 é "sem
 // permissão" (conta não-admin, esperado) e NÃO conta. Quem ouve isso (TalkChat)
@@ -213,6 +217,20 @@ export function subscribeTalkAuthBroken(l: () => void) {
 /** Rearma o disjuntor — chamado ao (re)vincular ou remover a conta. */
 export function resetTalkAuthBroken() {
   setAuthBroken(false);
+}
+
+/**
+ * Aciona o disjuntor a partir de uma fonte que NÃO passa pelo interceptor do
+ * axios acima — o EventSource do SSE (`useTalkSSE`) e os `fetch()` avulsos do
+ * indicador de digitação (`useTypingSender`). Sem isto, um 401 detectado só
+ * por esses dois caminhos nunca disparava o aviso de reconexão nem pausava o
+ * polling: só a lista de salas (que usa o client `api` acima) alimentava o
+ * disjuntor.
+ */
+export function markTalkAuthBroken(reason = '') {
+  lastAuthFailure = { reason, redmineSession: /redmine|não autenticado/i.test(reason) };
+  setAuthBroken(true);
+  window.dispatchEvent(new CustomEvent(TALK_AUTH_EXPIRED_EVENT));
 }
 
 api.interceptors.response.use(
@@ -317,6 +335,15 @@ export async function markMessagesRead(token: string, lastReadMessage: number): 
 
 export async function sendTyping(token: string, typing: boolean): Promise<void> {
   await api.post(`/rooms/${token}/typing`, { typing });
+}
+
+/** Quem reagiu com cada emoji: { "👍": [{ actorDisplayName, … }] } */
+export async function fetchReactions(
+  token: string,
+  messageId: number,
+): Promise<Record<string, { actorId: string; actorDisplayName: string }[]>> {
+  const { data } = await api.get(`/rooms/${token}/messages/${messageId}/reactions`);
+  return data ?? {};
 }
 
 export async function addReaction(
@@ -565,11 +592,12 @@ export interface UploadResult {
 // Mesmo limite do express.raw em server/routes/talk.js (POST /talk/rooms/:token/upload).
 // Checar no cliente evita subir o arquivo inteiro (às vezes minutos numa rede lenta)
 // só pra descobrir no fim que o servidor ia rejeitar com 413.
-export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+export const MAX_UPLOAD_LABEL = '500MB';
 
 export function uploadErrorMessage(err: unknown): string {
   if (axios.isAxiosError(err) && err.response?.status === 413) {
-    return 'Arquivo muito grande (máx. 100MB).';
+    return `Arquivo muito grande (máx. ${MAX_UPLOAD_LABEL}).`;
   }
   return (err instanceof Error ? err.message : null) || 'Falha ao enviar arquivo.';
 }

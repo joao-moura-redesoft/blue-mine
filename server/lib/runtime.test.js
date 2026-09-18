@@ -51,4 +51,26 @@ describe('DATA_DIR', () => {
     expect(DATA_DIR).toBeTruthy();
     expect(DATA_DIR.replace(/\\/g, '/')).toMatch(/\/server$/);
   });
+
+  // Instalado em Program Files (ou qualquer pasta com ACL de escrita negada),
+  // gravar ao lado do .exe falha — e sem esta saída o app fica sem cofre, sem
+  // sessão e sem log, quebrando de um jeito que não aponta para a causa.
+  it('empacotado numa pasta sem escrita, cai para o LOCALAPPDATA', async () => {
+    delete process.env.BLUEMINE_DATA_DIR;
+    process.env.LOCALAPPDATA = '/tmp/appdata';
+    process.pkg = {}; // finge o modo empacotado (isPkg)
+    vi.doMock('fs', () => {
+      const denied = () => {
+        throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
+      };
+      return { default: { writeFileSync: denied, unlinkSync: denied, mkdirSync: () => {} } };
+    });
+    try {
+      const { DATA_DIR } = await loadRuntime();
+      expect(DATA_DIR.replace(/\\/g, '/')).toBe('/tmp/appdata/Bluemine');
+    } finally {
+      delete process.pkg;
+      vi.doUnmock('fs');
+    }
+  });
 });

@@ -5,6 +5,8 @@ export interface SavedFilter {
   sortBy: 'priority' | 'due_date' | 'updated';
   priorityFilter: string;
   alertFilter: string | null;
+  // Opcional: filtros salvos antes desse campo existir continuam válidos ('none').
+  groupBy?: 'none' | 'project' | 'priority';
 }
 
 const LS_KEY = 'kanban-saved-filters';

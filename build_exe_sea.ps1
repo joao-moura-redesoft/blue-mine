@@ -30,27 +30,34 @@ Set-Location "$PSScriptRoot\client"; npm run build; Set-Location "$PSScriptRoot"
 Step 3 "Embutindo o frontend no servidor (dist-embedded.cjs)..."
 node scripts/embed-dist.cjs
 
-Step 4 "Bundlando o servidor num unico .cjs (esbuild)..."
+Step 4 "Embutindo config (.env) e CA interna (config-embedded.cjs)..."
+# Sem isto o .exe sozinho nao serve: o SERVIDOR le VITE_ZIMBRA_HOST, VITE_DOKUWIKI_HOST
+# e SSRF_WHITELIST em runtime, e a rede corporativa exige a CA interna. Segredos sao
+# filtrados pelo script. Ver server/lib/embeddedConfig.js.
+node scripts/embed-config.cjs
+
+Step 5 "Bundlando o servidor num unico .cjs (esbuild)..."
 New-Item -ItemType Directory -Force build | Out-Null
 npx esbuild server/index.js --bundle --platform=node --format=cjs --target="node$nodeMajor" --outfile=build/bluemine.bundle.cjs
 
-Step 5 "Gerando o blob SEA..."
+Step 6 "Gerando o blob SEA..."
 node --experimental-sea-config sea-config.json
 
-Step 6 "Copiando o binario do Node para bluemine.exe..."
+Step 7 "Copiando o binario do Node para bluemine.exe..."
 node -e "require('fs').copyFileSync(process.execPath, 'bluemine.exe')"
 
-Step 7 "Gravando o icone no executavel..."
+Step 8 "Gravando o icone no executavel..."
 try { node scripts/set-exe-icon.cjs "bluemine.exe" } catch { Write-Host "Aviso: nao foi possivel gravar o icone." -ForegroundColor DarkYellow }
 
-Step 8 "Marcando o binario como GUI (sem janela de console)..."
+Step 9 "Marcando o binario como GUI (sem janela de console)..."
 node scripts/set-gui-subsystem.cjs "bluemine.exe"
 if ($LASTEXITCODE -ne 0) { Write-Host "Falha ao marcar como GUI." -ForegroundColor Red; exit 1 }
 
-Step 9 "Injetando o blob no executavel (postject)..."
+Step 10 "Injetando o blob no executavel (postject)..."
 npx --yes postject bluemine.exe NODE_SEA_BLOB build/bluemine.blob --sentinel-fuse $FUSE
 if ($LASTEXITCODE -ne 0) { Write-Host "Falha ao injetar o blob." -ForegroundColor Red; exit 1 }
 
 Write-Host "`nBuild concluido! bluemine.exe (SEA) gerado na raiz." -ForegroundColor Green
+Write-Host "O .exe leva frontend, config e CA interna dentro: distribuir so o binario basta." -ForegroundColor Gray
 Write-Host "Dica: assine o binario (signtool) antes de distribuir." -ForegroundColor DarkGray
 Write-Host "Opcional: a telinha do teclado K86 e um COMPANION a parte -> rode build_bridge.ps1" -ForegroundColor DarkGray

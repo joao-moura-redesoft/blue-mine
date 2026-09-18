@@ -17,6 +17,8 @@ import {
   fetchRedmineTalkMatch,
   isTalkAuthBroken,
   subscribeTalkAuthBroken,
+  markTalkAuthBroken,
+  TALK_AUTH_CHANGED_EVENT,
 } from '../api/talk';
 import type {
   TalkMessage,
@@ -100,57 +102,117 @@ export function useTalkRooms() {
   });
 }
 
+/**
+ * SSE de invalidação — avisa quando QUALQUER sala do Talk mudou (não só a
+ * aberta no chat), para a lista de salas (badges, prévia, "Recentes" etc.)
+ * rebuscar na hora em vez de esperar o poll de 15s de `useTalkRooms`.
+ *
+ * Alimentado pelo mesmo poll do servidor que já varre o Talk a cada 3-12s
+ * para a telinha do teclado K86 e o Web Push (services/push.js) — antes
+ * disto, a mensagem aparecia no teclado visivelmente antes de aparecer na
+ * aba, porque cada lado rodava seu próprio poll em cadências diferentes e o
+ * servidor não avisava a aba de algo que ele já sabia.
+ *
+ * Mesmo padrão do useIssueStream: manda invalidação, não dados. Acelerador,
+ * não fonte única — sem canal (servidor reiniciando, push desligado), o
+ * poll de 15s de `useTalkRooms` continua cobrindo sozinho.
+ */
+export function useTalkRoomsStream(enabled: boolean) {
+  const qc = useQueryClient();
+  // talkEnabled() só existe DEPOIS do login flow do Talk (Nextcloud), que roda
+  // por conta própria, sem remontar o app — no primeiro render deste hook a
+  // conta costuma ainda não estar vinculada. Sem ouvir este evento, o efeito
+  // abaixo nunca reavalia talkEnabled() (suas deps não mudam sozinhas) e o
+  // canal ficava morto pelo resto da sessão. Mesmo evento que o TalkChat usa
+  // para reagir a (re)vínculo de conta.
+  const [authTick, setAuthTick] = useState(0);
+  useEffect(() => {
+    const onChanged = () => setAuthTick((t) => t + 1);
+    window.addEventListener(TALK_AUTH_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(TALK_AUTH_CHANGED_EVENT, onChanged);
+  }, []);
+
+  useEffect(() => {
+    if (!enabled || !talkEnabled()) return;
+
+    const sse = new EventSource('/api/talk/stream', { withCredentials: true });
+    sse.onmessage = () => qc.invalidateQueries({ queryKey: ['talk-rooms'] });
+    // Só reflete a queda; o EventSource tenta reconectar sozinho. O poll de
+    // 15s de useTalkRooms segue rodando como base — este canal é acelerador.
+    sse.onerror = () => {};
+
+    return () => sse.close();
+    // authTick (não usado no corpo) força reconectar quando a conta do Talk é (des)vinculada.
+  }, [enabled, qc, authTick]);
+}
+
+/**
+ * Reconcilia a lista `fresh` (resposta do servidor) com o cache local `prev`,
+ * sem perder mensagens em trânsito nem deixar mensagens já entregues
+ * piscarem e sumirem. Extraída como função pura (exportada) para poder ser
+ * testada sem montar toda a máquina do React Query — é a lógica mais
+ * bug-prone deste arquivo.
+ *
+ * Um refetch de fundo (intervalo de 30s, foco da aba, staleTime) NÃO pode simplesmente
+ * substituir o cache pela lista do servidor: isso apagaria (a) mensagens em TRÂNSITO
+ * e (b) mensagens já ENTREGUES que o Nextcloud ainda não indexou (read-after-write).
+ */
+export function mergeTalkMessages(prev: TalkMessage[], fresh: TalkMessage[]): TalkMessage[] {
+  // 1) Bolhas otimistas (enviando/falhou) ainda ausentes no servidor.
+  //    A mensagem real já chegou? (mesmo autor + texto) → descarta a bolha otimista.
+  //    Bônus: se o servidor recebeu mas a resposta falhou (timeout), a bolha "falhou"
+  //    some sozinha no próximo refetch, pois a mensagem real aparece em `fresh`.
+  //    Casamos por CONTAGEM (multiset), não por presença: enviar o mesmo texto 2x
+  //    seguidas gera 2 bolhas com a MESMA chave; um único real correspondente deve
+  //    descartar só UMA delas, não as duas (senão a 2ª some até o próximo refetch).
+  const pending = prev.filter((m) => m._status === 'sending' || m._status === 'failed');
+  const freshCounts = new Map<string, number>();
+  for (const m of fresh) {
+    const k = `${m.actorId} ${m.message}`;
+    freshCounts.set(k, (freshCounts.get(k) ?? 0) + 1);
+  }
+  const keepPending = pending.filter((p) => {
+    const k = `${p.actorId} ${p._clientText ?? p.message}`;
+    const n = freshCounts.get(k) ?? 0;
+    if (n > 0) {
+      freshCounts.set(k, n - 1); // consome uma correspondência real
+      return false; // o real chegou → descarta esta bolha otimista
+    }
+    return true; // ainda não veio → mantém
+  });
+
+  // 2) Read-after-write do Nextcloud: LOGO após enviar (POST já resolvido, bolha real
+  //    no cache SEM _status), o GET às vezes volta SEM a mensagem recém-postada. Antes,
+  //    como não havia mais nenhuma bolha "pending", o refetch devolvia `fresh` cru e a
+  //    mensagem JÁ ENTREGUE "piscava e sumia" alguns segundos depois. Preservamos toda
+  //    mensagem real do cache mais NOVA que a mais nova do servidor: só pode ser uma
+  //    entrega ainda não indexada — nunca uma exclusão (exclusões são de ids antigos).
+  //    Se `fresh` vier vazio (erro transitório), mantém a conversa inteira em vez de zerar.
+  const maxFreshId = fresh.reduce((max, m) => (m.id > max ? m.id : max), 0);
+  const freshIds = new Set(fresh.map((m) => m.id));
+  const keepNewer = prev.filter((m) => !m._status && m.id > maxFreshId && !freshIds.has(m.id));
+
+  if (keepPending.length === 0 && keepNewer.length === 0) return fresh;
+  return [...keepPending, ...keepNewer, ...fresh];
+}
+
 export function useTalkMessages(token: string | null) {
   const qc = useQueryClient();
   return useQuery({
     queryKey: ['talk-messages', token],
     queryFn: async () => {
       const fresh = await fetchMessages(token!);
-      // Um refetch de fundo (intervalo de 30s, foco da aba, staleTime) NÃO pode simplesmente
-      // substituir o cache pela lista do servidor: isso apagaria (a) mensagens em TRÂNSITO
-      // e (b) mensagens já ENTREGUES que o Nextcloud ainda não indexou (read-after-write).
-      // Merge abaixo protege as duas classes antes de aceitar `fresh`.
       const prev = qc.getQueryData<TalkMessage[]>(['talk-messages', token]) ?? [];
-
-      // 1) Bolhas otimistas (enviando/falhou) ainda ausentes no servidor.
-      //    A mensagem real já chegou? (mesmo autor + texto) → descarta a bolha otimista.
-      //    Bônus: se o servidor recebeu mas a resposta falhou (timeout), a bolha "falhou"
-      //    some sozinha no próximo refetch, pois a mensagem real aparece em `fresh`.
-      //    Casamos por CONTAGEM (multiset), não por presença: enviar o mesmo texto 2x
-      //    seguidas gera 2 bolhas com a MESMA chave; um único real correspondente deve
-      //    descartar só UMA delas, não as duas (senão a 2ª some até o próximo refetch).
-      const pending = prev.filter((m) => m._status === 'sending' || m._status === 'failed');
-      const freshCounts = new Map<string, number>();
-      for (const m of fresh) {
-        const k = `${m.actorId} ${m.message}`;
-        freshCounts.set(k, (freshCounts.get(k) ?? 0) + 1);
-      }
-      const keepPending = pending.filter((p) => {
-        const k = `${p.actorId} ${p._clientText ?? p.message}`;
-        const n = freshCounts.get(k) ?? 0;
-        if (n > 0) {
-          freshCounts.set(k, n - 1); // consome uma correspondência real
-          return false; // o real chegou → descarta esta bolha otimista
-        }
-        return true; // ainda não veio → mantém
-      });
-
-      // 2) Read-after-write do Nextcloud: LOGO após enviar (POST já resolvido, bolha real
-      //    no cache SEM _status), o GET às vezes volta SEM a mensagem recém-postada. Antes,
-      //    como não havia mais nenhuma bolha "pending", o refetch devolvia `fresh` cru e a
-      //    mensagem JÁ ENTREGUE "piscava e sumia" alguns segundos depois. Preservamos toda
-      //    mensagem real do cache mais NOVA que a mais nova do servidor: só pode ser uma
-      //    entrega ainda não indexada — nunca uma exclusão (exclusões são de ids antigos).
-      //    Se `fresh` vier vazio (erro transitório), mantém a conversa inteira em vez de zerar.
-      const maxFreshId = fresh.reduce((max, m) => (m.id > max ? m.id : max), 0);
-      const freshIds = new Set(fresh.map((m) => m.id));
-      const keepNewer = prev.filter((m) => !m._status && m.id > maxFreshId && !freshIds.has(m.id));
-
-      if (keepPending.length === 0 && keepNewer.length === 0) return fresh;
-      return [...keepPending, ...keepNewer, ...fresh];
+      return mergeTalkMessages(prev, fresh);
     },
     enabled: !!token && talkEnabled(),
     refetchInterval: 30_000, // SSE handles real-time; this is just a sync fallback
+    // Sem isto, o TanStack PAUSA este poll quando a aba perde o foco — e se o
+    // SSE tiver morrido de vez nesse meio-tempo (ver useTalkSSE: o EventSource
+    // não tenta reconectar sozinho depois de uma resposta não-2xx), a
+    // mensagem só aparece quando o usuário volta pra aba. É o "demora minutos,
+    // aí chega tudo de uma vez" quando a demora é o usuário ter saído da aba.
+    refetchIntervalInBackground: true,
     staleTime: 4_000,
   });
 }
@@ -160,11 +222,15 @@ export function useTalkMessages(token: string | null) {
 let tempSeq = 0;
 
 type SendVars = {
+  /** Texto como o servidor precisa: menções pelo actorId */
   message: string;
   replyTo?: number;
   // Apenas para a bolha otimista — ignorados pelo servidor
   _parent?: NonNullable<TalkMessage['parent']>;
+  /** Texto como a pessoa escreveu: menções pelo nome (é o que a bolha mostra) */
   _text?: string;
+  /** Menções do texto (nome → actorId), para a bolha otimista já sair com etiqueta */
+  _mentions?: Record<string, string>;
 };
 
 export function useSendMessage(token: string | null, myId = '', myName = '') {
@@ -181,8 +247,17 @@ export function useSendMessage(token: string | null, myId = '', myName = '') {
         actorId: myId,
         actorDisplayName: myName,
         timestamp: Math.floor(Date.now() / 1000),
-        message: vars.message,
-        messageParameters: {},
+        // A bolha mostra o texto legível; o do servidor fica em _clientText,
+        // que é o que um reenvio precisa mandar de volta.
+        message: vars._text ?? vars.message,
+        // Parâmetros equivalentes aos que o servidor devolveria, só para a bolha
+        // otimista já mostrar a menção como etiqueta em vez de texto cru.
+        messageParameters: Object.fromEntries(
+          Object.entries(vars._mentions ?? {}).map(([name, id], i) => [
+            `mention-user${i + 1}`,
+            { type: id === 'all' ? 'call' : 'user', id, name },
+          ]),
+        ),
         systemMessage: '',
         messageType: 'comment',
         isReplyable: false,
@@ -190,7 +265,7 @@ export function useSendMessage(token: string | null, myId = '', myName = '') {
         reactions: {},
         reactionsSelf: [],
         _status: 'sending',
-        _clientText: vars._text ?? vars.message,
+        _clientText: vars.message,
         _clientReplyTo: vars.replyTo,
       };
       await qc.cancelQueries({ queryKey: ['talk-messages', token] });
@@ -387,6 +462,21 @@ export function useSearchNCUsers(query: string) {
   });
 }
 
+// `fetch()` avulso (não passa pelo axios `api` de api/talk.ts, então um 401
+// aqui nunca acionava o disjuntor sozinho — só a lista de salas alimentava.
+// Checar o status manualmente fecha essa lacuna para o indicador de digitação.
+function sendTypingBeacon(token: string, typing: boolean) {
+  fetch(`/api/talk/rooms/${encodeURIComponent(token)}/typing`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ typing }),
+  })
+    .then((r) => {
+      if (r.status === 401) markTalkAuthBroken();
+    })
+    .catch(() => {});
+}
+
 // Debounced typing sender — chama sendTyping sem sobrecarregar a API.
 export function useTypingSender(token: string | null) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -396,20 +486,12 @@ export function useTypingSender(token: string | null) {
     if (!token) return;
     if (!isTyping.current) {
       isTyping.current = true;
-      fetch(`/api/talk/rooms/${encodeURIComponent(token)}/typing`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ typing: true }),
-      }).catch(() => {});
+      sendTypingBeacon(token, true);
     }
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       isTyping.current = false;
-      fetch(`/api/talk/rooms/${encodeURIComponent(token)}/typing`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ typing: false }),
-      }).catch(() => {});
+      sendTypingBeacon(token, false);
     }, 3000);
   }, [token]);
 
@@ -417,11 +499,7 @@ export function useTypingSender(token: string | null) {
     if (timerRef.current) clearTimeout(timerRef.current);
     if (isTyping.current && token) {
       isTyping.current = false;
-      fetch(`/api/talk/rooms/${encodeURIComponent(token)}/typing`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ typing: false }),
-      }).catch(() => {});
+      sendTypingBeacon(token, false);
     }
   }, [token]);
 
@@ -459,12 +537,9 @@ export function useTalkSSE(token: string | null, initialMessageId: number) {
     const params = new URLSearchParams({
       lastKnownMessageId: String(initialMessageId),
     });
+    const url = `/api/talk/rooms/${encodeURIComponent(token)}/sse?${params}`;
 
-    const sse = new EventSource(`/api/talk/rooms/${encodeURIComponent(token)}/sse?${params}`, {
-      withCredentials: true,
-    });
-
-    sse.onmessage = (e) => {
+    const onMessage = (e: MessageEvent) => {
       let event: { type: string; data: unknown };
       try {
         event = JSON.parse(e.data);
@@ -527,6 +602,16 @@ export function useTalkSSE(token: string | null, initialMessageId: number) {
         }
       }
 
+      if (event.type === 'auth-error') {
+        // O servidor detectou 401/403 da Nextcloud no meio do long-poll e
+        // encerrou o stream (ver server/routes/talk.js). Sem isto, o indicador
+        // "Conectado" ficava mentindo — o `onopen` já tinha disparado antes da
+        // credencial ser revogada, e só o fallback REST de 30s (que passa pelo
+        // interceptor do axios) acabava denunciando o problema.
+        markTalkAuthBroken();
+        return;
+      }
+
       if (event.type === 'typing') {
         const users = event.data as Array<{ actorId: string; actorDisplayName: string }>;
 
@@ -568,19 +653,47 @@ export function useTalkSSE(token: string | null, initialMessageId: number) {
       }
     };
 
-    sse.onopen = () => setConnected(true);
+    let sse: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+    let cancelled = false;
 
-    sse.onerror = () => {
-      // EventSource reconecta sozinho; só refletimos a queda na UI. Quando a
-      // reconexão vinga, o onopen acima volta o indicador para "conectado".
-      setConnected(false);
+    // O EventSource nativo reconecta sozinho na maioria das quedas — MAS, por
+    // spec, ele DESISTE de vez se uma tentativa de reconexão bater numa
+    // resposta não-2xx (ex.: cookie de sessão do Redmine flakou por um
+    // instante bem na hora do retry; ver server/routes/talk.js). Sem isto, o
+    // chat ficava "sem conexão" permanentemente até fechar e reabrir a
+    // janela — a única coisa entregando mensagem depois disso era o poll REST
+    // de 30s, e só quando a aba estava em foco. `readyState === CLOSED` é o
+    // sinal de que o navegador desistiu; aí assumimos a reconexão nós mesmos,
+    // com backoff.
+    const connect = () => {
+      sse = new EventSource(url, { withCredentials: true });
+      sse.onmessage = onMessage;
+      sse.onopen = () => {
+        attempt = 0;
+        setConnected(true);
+      };
+      sse.onerror = () => {
+        setConnected(false);
+        if (cancelled) return;
+        if (sse?.readyState === EventSource.CLOSED) {
+          sse.close();
+          const delay = Math.min(30_000, 2000 * 2 ** attempt);
+          attempt++;
+          reconnectTimer = setTimeout(connect, delay);
+        }
+      };
     };
+    connect();
 
     // Captura o Map agora: no cleanup, ler typingTimers.current de novo poderia
     // pegar outro objeto e deixar os timers deste efeito rodando soltos.
     const timers = typingTimers.current;
     return () => {
-      sse.close();
+      cancelled = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      sse?.close();
       timers.forEach((t) => clearTimeout(t));
       timers.clear();
       setTypingUsers([]);

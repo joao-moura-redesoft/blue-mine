@@ -37,6 +37,17 @@ describe('errorMiddleware', () => {
     expect(res.body).toEqual({ error: 'Ocorreu um erro interno no servidor.' });
   });
 
+  // Sem isto, a CA interna faltando na máquina virava "erro interno no servidor"
+  // e o usuário não tinha como saber que bastava instalar o certificado.
+  it('explica a falha de CA interna em vez de esconder num 500 genérico', () => {
+    const res = mockRes();
+    const err = new Error('self-signed certificate in certificate chain');
+    err.code = 'SELF_SIGNED_CERT_IN_CHAIN';
+    errorMiddleware(err, req, res, () => {});
+    expect(res.statusCode).toBe(502);
+    expect(res.body.error).toMatch(/CA interna|redmine-ca\.pem/);
+  });
+
   it('normaliza 401/403 numa mensagem genérica de credenciais', () => {
     const res = mockRes();
     errorMiddleware({ response: { status: 403, data: { secret: 'x' } } }, req, res, () => {});

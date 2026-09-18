@@ -55,14 +55,43 @@ async function sendTalkMessage(userId, roomToken, text) {
 // Usado pela ação talk.notify_person do motor de automações — a mesma restrição de
 // grupo/visibilidade do Nextcloud que vale pro app também vale aqui (ver
 // [[talk-redmine-name-match]]): pode devolver null mesmo com ncUid válido.
-async function createDMAs(userId, ncUid) {
+// Devolve a sala inteira porque o displayName dela denuncia conta que não existe
+// mais (ver lib/ncAccount.js).
+async function openDMAs(userId, ncUid) {
   const client = talkClientFor(userId);
   if (!client || !ncUid) return null;
   const { data } = await client.post('/ocs/v2.php/apps/spreed/api/v4/room?format=json', {
     roomType: 1,
     invite: ncUid,
   });
-  return data?.ocs?.data?.token || null;
+  const room = data?.ocs?.data;
+  return room?.token ? { token: room.token, displayName: room.displayName || '' } : null;
+}
+
+/**
+ * A conta do Nextcloud existe e está habilitada?
+ *   true  → confirmado ativa
+ *   false → confirmado inativa (desabilitada ou apagada)
+ *   null  → não deu pra saber (a conta que consulta não tem permissão)
+ * O caso `null` é o normal aqui, porque a conta usada pelas automações não é
+ * admin — quem resolve nesse caso é o sinal indireto em lib/ncAccount.js.
+ */
+async function checkNcAccount(userId, ncUid) {
+  const client = talkClientFor(userId);
+  if (!client || !ncUid) return null;
+  try {
+    const { data } = await client.get(
+      `/ocs/v2.php/cloud/users/${encodeURIComponent(ncUid)}?format=json`,
+    );
+    const d = data?.ocs?.data;
+    const code = Number(data?.ocs?.meta?.statuscode);
+    if (code === 404) return false; // OCS v1 devolve o erro no corpo, com HTTP 200
+    if (!d || !d.id) return null; // 403/997: sem permissão, não é resposta sobre a conta
+    return d.enabled !== false;
+  } catch (e) {
+    if (e?.response?.status === 404) return false;
+    return null; // 403/997/rede: inconclusivo
+  }
 }
 
 // Token da sala "Nota para si mesmo" (roomType 6, criada automaticamente pelo Nextcloud
@@ -100,7 +129,8 @@ module.exports = {
   clearTalkAuth,
   talkClientFor,
   sendTalkMessage,
-  createDMAs,
+  openDMAs,
+  checkNcAccount,
   selfNoteRoomToken,
   setUserStatus,
 };

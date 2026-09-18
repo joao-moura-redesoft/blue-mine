@@ -74,6 +74,12 @@ export function RunLogPanel({ workflowId }: { workflowId: string }) {
                         {actionLabel(a.type)}
                       </span>
                       {a.error && <span className="text-rose-500"> — {a.error}</span>}
+                      {/* Rodou sem erro, mas não entregou: não pode passar como
+                          sucesso silencioso (foi assim que um aviso ficou meses
+                          indo pra uma conta desativada sem ninguém notar). */}
+                      {a.warn && (
+                        <span className="text-amber-600 dark:text-amber-400"> — {a.warn}</span>
+                      )}
                       {a.stopped && (
                         <span className="ml-1 inline-flex items-center gap-0.5 text-[10px] px-1 py-0.5 rounded bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">
                           <OctagonX size={9} /> ramo interrompido

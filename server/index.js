@@ -1,6 +1,19 @@
 // Ponto de entrada do servidor Bluemine: monta o app Express e sobe os workers
 // de background (polling de Web Push). A lógica vive em app.js, routes/ e services/.
-require('dotenv').config();
+// Configuração, em ordem de precedência (dotenv nunca sobrescreve o que já existe):
+//   1. ambiente real  2. .env na pasta de dados  3. .env ao lado do .exe
+//   4. .env do diretório atual (dev)  5. valores embutidos no build (embeddedConfig)
+// Procurar em DATA_DIR/APP_DIR e não só no cwd importa porque o .exe pode ser aberto
+// por atalho, tarefa agendada ou pelo relançamento do auto-update — todos com
+// diretório atual diferente da pasta do executável.
+const path = require('path');
+const dotenv = require('dotenv');
+const { DATA_DIR, APP_DIR } = require('./lib/runtime');
+// quiet: sem ele o dotenv v17 imprime um banner por chamada — três agora.
+dotenv.config({ path: path.join(DATA_DIR, '.env'), quiet: true });
+dotenv.config({ path: path.join(APP_DIR, '.env'), quiet: true });
+dotenv.config({ quiet: true });
+require('./lib/embeddedConfig').applyEmbeddedEnv();
 
 // Empacotado como app GUI (bluemine.exe sem janela de console no Windows),
 // escritas em stdout/stderr podem falhar (EBADF/EPIPE) porque não há console.
@@ -17,7 +30,9 @@ require('./lib/internalCa').applyGlobalCaTrust();
 const buildApp = require('./app');
 const { startPushPolling } = require('./services/push');
 const { startBridge } = require('./services/keyboardBridge');
+const { startTray, stopTray } = require('./services/tray');
 const { openAppWindow } = require('./lib/launcher');
+const { onShutdown, requestShutdown } = require('./lib/shutdown');
 const { writeBootMarker } = require('./services/updater');
 
 // Simulação de falha de boot para TESTAR o rollback do auto-update: sai ANTES do
@@ -45,9 +60,20 @@ const server = app.listen(PORT, HOST, () => {
   writeBootMarker();
   // Abre a janela dedicada do app (Edge em app mode → navegador padrão).
   openAppWindow(APP_URL, { host: HOST });
+  // Ícone na bandeja do Windows — como o .exe roda sem console, é por ali que o
+  // usuário reabre a janela e encerra o servidor.
+  startTray({ url: APP_URL, host: HOST });
   // Sobe o processo-ponte da telinha do teclado K86 (best-effort).
   startBridge();
 });
+
+// Encerramento ordenado (item "Sair" da bandeja; Ctrl+C em dev).
+onShutdown(() => {
+  stopTray();
+  server.close();
+});
+process.on('SIGINT', () => requestShutdown('SIGINT'));
+process.on('SIGTERM', () => requestShutdown('SIGTERM'));
 
 // Se a porta já estiver em uso, provavelmente o .exe já está rodando: em vez de
 // crashar, apenas abre a janela apontando para a instância existente e sai.

@@ -142,6 +142,8 @@ dist
 build/bluemine.bundle.cjs
 build/bluemine.blob
 server/dist-embedded.cjs
+# Config + CA embutidas (geradas do .env local — não versionar, é config de instalação)
+server/config-embedded.cjs
 
 # Artefatos de runtime do auto-update (por-máquina)
 *.exe.new
@@ -149,6 +151,10 @@ server/dist-embedded.cjs
 .bluemine-boot-ok
 bluemine-update.ps1
 SHA256SUMS
+
+# Artefatos de runtime do ícone da bandeja (services/tray.js)
+bluemine-tray.ps1
+.bluemine-tray-hint
 
 # ATENÇÃO: os padrões abaixo são propositalmente SEM prefixo de pasta.
 # O DATA_DIR (server/lib/runtime.js) é server/ em `npm run dev`, mas
@@ -169,6 +175,7 @@ vault-key.json
 sessions.json
 talk.json
 secrets.json
+talk-dead-accounts.json
 database.db
 
 # Dados de runtime do usuário (blobs DPAPI por-máquina) — não versionar:

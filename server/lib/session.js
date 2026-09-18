@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { dataFile, readJsonSecure, writeJsonSecure } = require('./secureStore');
+const log = require('./logger');
 
 const SESSIONS_FILE = dataFile('sessions.json');
 
@@ -21,13 +22,41 @@ function saveSessions() {
   writeJsonSecure(SESSIONS_FILE, Array.from(sessionsMap.entries()), { requireEncryption: true });
 }
 
+// Entrar de novo não apagava as sessões antigas do mesmo usuário: o logout só
+// derruba a do cookie atual, então toda sessão cujo cookie se perdeu (outro
+// navegador, cookie limpo, reinstalação) ficava órfã aqui guardando a senha
+// ANTIGA — e o motor de automações percorre TODAS a cada tick. Depois de uma
+// troca de senha no AD isso vira aviso permanente no log e, como a guarda de
+// credencial vive em memória, mais uma tentativa real de login no domínio a
+// cada reinício do processo. Ver credentialGuard.js.
+//
+// Descarta só o que é comprovadamente vencido: mesmo servidor e mesmo usuário,
+// com senha DIFERENTE da que o Redmine acabou de aceitar. Sessões válidas em
+// paralelo (o app e o navegador ao mesmo tempo) guardam a mesma senha e ficam
+// de pé — este não é um "um login por vez".
+function evictStaleTwins({ url, username, password }) {
+  if (!url || !username || !password) return 0;
+  const user = String(username).toLowerCase(); // AD é case-insensitive
+  let dropped = 0;
+  for (const [id, s] of sessionsMap.entries()) {
+    if (s.url !== url) continue;
+    if (String(s.username || '').toLowerCase() !== user) continue;
+    if (!s.password || s.password === password) continue;
+    sessionsMap.delete(id);
+    dropped += 1;
+  }
+  return dropped;
+}
+
 function createSession(authData) {
   const sessionId = crypto.randomUUID();
+  const dropped = evictStaleTwins(authData);
   sessionsMap.set(sessionId, {
     ...authData,
     createdAt: Date.now(),
   });
   saveSessions();
+  if (dropped > 0) log.info('sessions_stale_evicted', { url: authData.url, count: dropped });
   return sessionId;
 }
 
@@ -67,10 +96,12 @@ function cleanupSessions() {
 
 setInterval(cleanupSessions, 12 * 60 * 60 * 1000); // Roda a cada 12h
 
-// Todas as sessões ativas (valores). Usado pelo motor de automações para rodar
-// no background com as credenciais de quem está logado, mesmo sem Web Push.
+// Todas as sessões ativas. Usado pelo motor de automações para rodar no
+// background com as credenciais de quem está logado, mesmo sem Web Push.
+// O `id` vai junto porque quem roda fora de uma requisição HTTP não tem cookie
+// e, sem ele, não teria como derrubar uma sessão de credencial vencida.
 function listSessions() {
-  return Array.from(sessionsMap.values());
+  return Array.from(sessionsMap.entries()).map(([id, s]) => ({ id, ...s }));
 }
 
 module.exports = {

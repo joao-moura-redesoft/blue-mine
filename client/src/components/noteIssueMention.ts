@@ -2,11 +2,12 @@ import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { Node as PMNode } from '@tiptap/pm/model';
+import { issueRefRegex } from '../utils/issueRef';
 
-// Decora referências #1234 no texto para ficarem clicáveis (abrem a tarefa)
+// Decora referências #92313 no texto para ficarem clicáveis (abrem a tarefa)
 function buildDecorations(doc: PMNode): DecorationSet {
   const decos: Decoration[] = [];
-  const re = /(?<!\w)#(\d+)(?!\w)/g;
+  const re = issueRefRegex();
   doc.descendants((node, pos) => {
     if (!node.isText || !node.text) return;
     re.lastIndex = 0;

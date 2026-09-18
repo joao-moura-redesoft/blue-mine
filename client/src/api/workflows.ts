@@ -74,6 +74,8 @@ export interface WorkflowRunAction {
   error?: string;
   /** true quando a falha interrompeu o ramo (config `onError: 'stop'`). */
   stopped?: boolean;
+  /** A ação rodou sem erro, mas não fez o que devia (ex.: conta do Talk inativa). */
+  warn?: string;
   /** Presentes só na ação `notify`: conteúdo enviado (independente do push ter funcionado). */
   title?: string;
   body?: string;

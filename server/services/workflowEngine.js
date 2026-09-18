@@ -19,6 +19,7 @@ const keyboard = require('./keyboardNotify');
 const soundNotify = require('./soundNotify');
 const talkStore = require('./talkStore');
 const talkMatch = require('./talkMatch');
+const { looksDeadRoom } = require('../lib/ncAccount');
 const zimbra = require('../zimbra');
 const { resolveInput } = require('../lib/variableResolver');
 const {
@@ -105,7 +106,7 @@ async function collectRunners(subscriptions) {
     if (rec.uid && !byUid.has(rec.uid)) byUid.set(rec.uid, rec);
   }
   try {
-    const { listSessions } = require('../lib/session');
+    const { listSessions, destroySession } = require('../lib/session');
     for (const s of listSessions()) {
       if (!s.url) continue;
       const rec = {
@@ -125,6 +126,21 @@ async function collectRunners(subscriptions) {
           status: e.response?.status,
           detail: e.response?.data || e.message,
         });
+        // Credencial vencida (senha trocada no AD): esta sessão nunca mais vai
+        // autenticar. O errorMiddleware, que derruba sessão nesse caso, não
+        // alcança aqui — não há requisição HTTP nem cookie neste caminho. Sem
+        // remover, o mesmo aviso se repete a cada tick para sempre e cada
+        // reinício do processo ainda gasta um login falho no domínio antes de a
+        // guarda (em memória) pegar de novo. Ver credentialGuard.js.
+        if (e.credentialsStale && s.id) {
+          try {
+            destroySession(s.id);
+            logger.warn('workflow_session_dropped', { url: s.url });
+          } catch (err) {
+            // best-effort: falhar ao gravar sessions.json não pode parar o tick
+            logger.warn('workflow_session_drop_failed', { detail: err.message });
+          }
+        }
         continue;
       }
       if (uid && !byUid.has(uid)) {
@@ -945,14 +961,46 @@ async function execAction(node, ctx, rec, sendPush, subscriptions, { test } = {}
         );
         return { matched: false };
       }
-      const token = await talkStore.createDMAs(rec.uid, m.ncUid);
-      if (!token) {
+      // Conta pode ter sido desativada (a pessoa migrou pra outra): o vínculo é
+      // por nome e o catálogo do Nextcloud mantém a conta velha com o mesmo nome.
+      // Avisar uma conta morta é pior que não avisar — ninguém lê, e quem devia
+      // ser cobrado não fica sabendo.
+      const inactive = (why) => {
+        console.warn('[workflow] talk.notify_person: conta do Talk inativa —', why, m.ncUid);
+        return {
+          matched: true,
+          sent: false,
+          inactiveAccount: true,
+          ncName: m.ncName,
+          warn: `A conta do Talk vinculada a ${m.ncName || 'esta pessoa'} está inativa — ninguém foi avisado.`,
+        };
+      };
+      if (talkMatch.isDeadNcUid(m.ncUid)) return inactive('já conhecida');
+      const active = await talkStore.checkNcAccount(rec.uid, m.ncUid);
+      if (active === false) {
+        talkMatch.markDeadNcUid(m.ncUid, 'nextcloud: conta desabilitada ou inexistente');
+        return inactive('desabilitada no Nextcloud');
+      }
+
+      const room = await talkStore.openDMAs(rec.uid, m.ncUid);
+      if (!room) {
         // Mesma restrição de grupo/visibilidade do Nextcloud que afeta o app (ver
         // [[talk-redmine-name-match]]): sabemos quem é, mas essa conta não pode
         // iniciar conversa com ela.
-        return { matched: true, sent: false, ncName: m.ncName };
+        return {
+          matched: true,
+          sent: false,
+          ncName: m.ncName,
+          warn: `Não foi possível abrir conversa no Talk com ${m.ncName || 'esta pessoa'} — ninguém foi avisado.`,
+        };
       }
-      await talkStore.sendTalkMessage(rec.uid, token, cfg.message || '');
+      // Sem permissão pra consultar a conta (o normal, já que não somos admin), a
+      // própria sala denuncia: 1:1 sem nome resolvido = conta que não existe mais.
+      if (active === null && looksDeadRoom(m.ncUid, room.displayName)) {
+        talkMatch.suspectDeadNcUid(m.ncUid, 'sala 1:1 sem nome resolvido');
+        return inactive('sala 1:1 sem nome resolvido');
+      }
+      await talkStore.sendTalkMessage(rec.uid, room.token, cfg.message || '');
       return { matched: true, sent: true, ncName: m.ncName };
     }
     case 'issue.update': {

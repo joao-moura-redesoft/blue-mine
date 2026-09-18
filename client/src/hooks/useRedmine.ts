@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import {
   useQuery,
   useQueries,
@@ -6,7 +6,13 @@ import {
   useQueryClient,
   type QueryClient,
 } from '@tanstack/react-query';
-import { redmineApi, type Upload } from '../api/redmine';
+import {
+  redmineApi,
+  getIssuesMeta,
+  subscribeIssuesMeta,
+  type Upload,
+  type IssuesMeta,
+} from '../api/redmine';
 import type {
   Issue,
   IssueStatus,
@@ -99,6 +105,12 @@ export function useIssues(projectId?: number) {
     // para que as notificações de novas atribuições continuem disparando.
     refetchIntervalInBackground: true,
   });
+}
+
+// Se a última busca de tarefas bateu na trava de 2000 do servidor. Vem por fora
+// do react-query porque o cache ['issues'] precisa continuar sendo um Issue[].
+export function useIssuesMeta(): IssuesMeta {
+  return useSyncExternalStore(subscribeIssuesMeta, getIssuesMeta, getIssuesMeta);
 }
 
 export function useIssueDetail(id: number | null) {

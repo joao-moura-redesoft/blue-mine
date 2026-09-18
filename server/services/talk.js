@@ -2,13 +2,19 @@ const axios = require('axios');
 const { getMyUserId } = require('../lib/redmine');
 const { getTalkAuth } = require('./talkStore');
 const { safeAgents } = require('../lib/ssrfGuard');
+const AppError = require('../lib/AppError');
 
 async function makeTalk(req) {
   const uid = await getMyUserId(req);
-  if (!uid) throw Object.assign(new Error('Não autorizado (Redmine)'), { statusCode: 401 });
+  // AppError (isSafe) preserva esta mensagem até o cliente — é o que permite
+  // distinguir "sessão do Bluemine caiu" (reconectar o Talk não resolve) de
+  // "token do Nextcloud revogado" (reconectar resolve). Um Error comum aqui
+  // era mascarado pelo errorMiddleware com um texto genérico, e as duas causas
+  // ficavam indistinguíveis no cliente (ver client/src/api/talk.ts).
+  if (!uid) throw new AppError(401, 'Não autorizado (Redmine)');
 
   const auth = getTalkAuth(uid);
-  if (!auth) throw Object.assign(new Error('Conta do Talk não vinculada'), { statusCode: 401 });
+  if (!auth) throw new AppError(401, 'Conta do Talk não vinculada');
 
   return axios.create({
     baseURL: auth.url,

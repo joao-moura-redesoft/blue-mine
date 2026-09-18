@@ -98,6 +98,9 @@ function buildApp() {
   // Download de anexo de e-mail: autentica pelo token ?s= (o <img> do iframe não
   // envia cookie de sessão), então fica ANTES do authMiddleware de propósito.
   app.use('/api', require('./routes/mailAttachment'));
+  // Ícone da bandeja: o powershell.exe da bandeja não tem sessão; autentica por
+  // token próprio (ver services/tray.js), então também fica antes do auth.
+  app.use('/api', require('./routes/tray'));
   app.use('/api', authMiddleware);
   app.use('/api', diagnostics);
   app.use('/api', require('./routes/update'));

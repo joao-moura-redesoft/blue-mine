@@ -11,7 +11,7 @@ const {
   DEFAULT_KEY,
 } = require('../lib/redmine');
 const handle = require('../lib/handle');
-const { mapLimit, fetchAllIssues } = require('../lib/pagination');
+const { mapLimit, fetchAllIssues, fetchAllIssuesMeta } = require('../lib/pagination');
 const { parseEditFormSchema } = require('../lib/editFormSchema');
 const { REDMINE_CF, REDMINE_STATUS } = require('../lib/config');
 const { sanitizeIssueBody, toLatin1Safe } = require('../lib/latin1');
@@ -59,14 +59,53 @@ router.get(
   }),
 );
 
+// Janela das tarefas FECHADAS no board. `status_id: '*'` trazia todas as fechadas
+// de sempre — centenas de páginas de tarefas que nenhuma tela mostra (o board
+// esconde as colunas fechadas por padrão; Dashboard/MyDay/Inbox/Calendar as
+// descartam). O corte vai na query do Redmine, como em /issues/mentions.
+// ISSUES_CLOSED_DAYS: 'all' volta ao comportamento antigo; 0 tira as fechadas.
+const CLOSED_DAYS = /^all$/i.test(process.env.ISSUES_CLOSED_DAYS || '')
+  ? null
+  : Number.isFinite(Number(process.env.ISSUES_CLOSED_DAYS))
+    ? Number(process.env.ISSUES_CLOSED_DAYS)
+    : 180;
+
+// As duas buscas do board: abertas sem corte nenhum + fechadas da janela.
+// Exportada para teste — é aqui que o filtro de data pode se perder num refactor.
+//
+// `statusId` explícito do cliente (ex.: a aba Pessoas pede 'open') manda: só o
+// pedido genérico ('*' ou nada) recebe o escopo do board.
+function myIssuesQueries(base, nowMs = Date.now(), closedDays = CLOSED_DAYS, statusId) {
+  if (statusId && statusId !== '*') return [{ ...base, status_id: statusId }];
+  const open = { ...base, status_id: closedDays === null ? '*' : 'open' };
+  if (closedDays === null) return [open]; // 'all': uma query só, como era antes
+  if (closedDays <= 0) return [open];
+  const since = new Date(nowMs - closedDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return [open, { ...base, status_id: 'closed', updated_on: `>=${since}` }];
+}
+
 // Minhas issues
 router.get(
   '/issues',
   handle(async (req, res) => {
-    const { limit: _limit, offset: _offset, ...rest } = req.query; // ignora limit/offset do cliente; paginamos tudo
-    const params = { assigned_to_id: 'me', status_id: '*', include: 'children', ...rest };
-    const issues = await fetchAllIssues(makeRedmine(req), params);
-    res.json({ issues, total_count: issues.length });
+    // Ignora limit/offset do cliente (a paginação é nossa). O status_id sai do
+    // `rest` porque cada query abaixo define o seu.
+    const { limit: _limit, offset: _offset, status_id: statusId, ...rest } = req.query;
+    const base = { assigned_to_id: 'me', include: 'children', ...rest };
+    const redmine = makeRedmine(req);
+
+    const results = await Promise.all(
+      myIssuesQueries(base, Date.now(), CLOSED_DAYS, statusId).map((params) =>
+        fetchAllIssuesMeta(redmine, params),
+      ),
+    );
+    const issues = results.flatMap((r) => r.issues);
+    res.json({
+      issues,
+      total_count: issues.length,
+      truncated: results.some((r) => r.truncated),
+      closed_days: CLOSED_DAYS,
+    });
   }),
 );
 
@@ -510,4 +549,4 @@ router.get(
 );
 
 module.exports = router;
-module.exports.__testables = { mentionCandidateQueries };
+module.exports.__testables = { mentionCandidateQueries, myIssuesQueries };

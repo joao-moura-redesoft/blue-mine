@@ -48,6 +48,7 @@ import { inlineDataImages } from '../utils/mailInlineImages';
 import { MailComposeEditor } from './MailComposeEditor';
 import { MailSettingsModal } from './MailSettingsModal';
 import { errorDetail } from '../utils/httpError';
+import * as mailUnreadGuard from '../utils/mailUnreadGuard';
 
 // Ícone e ordem amigável por pasta do Zimbra.
 const FOLDER_META: Record<string, { label: string; icon: React.ReactNode; order: number }> = {
@@ -205,9 +206,12 @@ function MailViewInner() {
       );
     }
     if (isInbox) {
-      qc.setQueryData<{ unread: number; inboxTotal: number }>(['mail', 'unread'], (old) =>
-        old ? { ...old, unread: Math.max(0, old.unread - 1) } : old,
-      );
+      qc.setQueryData<{ unread: number; inboxTotal: number }>(['mail', 'unread'], (old) => {
+        if (!old) return old;
+        const next = Math.max(0, old.unread - 1);
+        mailUnreadGuard.recordLocalDecrement(old.unread, next);
+        return { ...old, unread: next };
+      });
     }
   };
 
@@ -394,6 +398,10 @@ function MailViewInner() {
                 setTimeout(() => qc.invalidateQueries({ queryKey: ['mail', 'list'] }), 2500);
               }}
               onActed={(closeAfter) => {
+                // Ação explícita (marcar não lida, lixeira, sinalizar…): o próximo
+                // valor do servidor deve valer sem filtro, mesmo que reverta a
+                // leitura otimista que a guarda estava protegendo.
+                mailUnreadGuard.clear();
                 qc.invalidateQueries({ queryKey: ['mail', 'list'] });
                 qc.invalidateQueries({ queryKey: ['mail', 'folders'] });
                 qc.invalidateQueries({ queryKey: ['mail', 'unread'] });

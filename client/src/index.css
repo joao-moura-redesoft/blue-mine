@@ -11,11 +11,7 @@
   }
   body {
     @apply bg-slate-100 text-slate-900 antialiased;
-    font-feature-settings:
-      'cv02',
-      'cv03',
-      'cv04',
-      'cv11';
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   }
   * {
     @apply box-border;
@@ -447,6 +443,24 @@ html.dark .prose-redmine h3 {
 }
 .prose-redmine a {
   @apply text-blue-600 hover:underline;
+}
+/* Referência a tarefa (#92313) dentro de descrição/nota: chip clicável */
+.prose-redmine a[href^='#rk-issue-'] {
+  @apply inline-flex items-baseline gap-1 px-1 rounded font-mono text-xs font-semibold;
+  @apply no-underline cursor-pointer bg-blue-50 text-blue-700 border border-blue-100;
+}
+/* Ponto de status da tarefa citada (cor vem de bg-* no próprio span) */
+.prose-redmine .rk-issue-dot {
+  @apply self-center w-1.5 h-1.5 rounded-full flex-shrink-0;
+}
+.prose-redmine a[href^='#rk-issue-']:hover {
+  @apply bg-blue-100 no-underline;
+}
+html.dark .prose-redmine a[href^='#rk-issue-'] {
+  @apply bg-blue-950/40 text-blue-300 border-blue-800;
+}
+html.dark .prose-redmine a[href^='#rk-issue-']:hover {
+  @apply bg-blue-900/40;
 }
 .prose-redmine code {
   @apply bg-slate-200/70 text-slate-800 px-1 py-0.5 rounded text-xs font-mono;
@@ -979,4 +993,29 @@ html.dark .slash-item.is-selected {
 }
 html.dark .slash-ico {
   background: #334155;
+}
+
+/* ── Diagramas Mermaid ─────────────────────────────────────────────────────
+   O mermaid emite `max-width` inline no <svg> calculado a partir da largura
+   que ele mediu no momento do render — dentro do modal isso costuma sair menor
+   que o container. `width: 100%` com `!important` no lugar deixa o diagrama
+   ocupar o espaço disponível; `height: auto` preserva a proporção. */
+.mermaid-svg svg {
+  /* O mermaid roda com useMaxWidth: false (precisamos de width/height em pixels
+     para rasterizar), então o SVG vem com a largura natural do diagrama. Aqui
+     ele é limitado ao container SEM esticar: `width: auto` + `max-width: 100%`
+     encolhe o que é largo e deixa o que é pequeno no tamanho real — um
+     `width: 100%` infla um diagrama de 3 caixas até ficar borrado. */
+  width: auto;
+  max-width: 100% !important;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+/* Ampliado: usa o tamanho natural do diagrama (o container do modal rola). */
+.mermaid-svg-zoom svg {
+  width: auto;
+  max-width: none !important;
+  height: auto;
+  max-height: 84vh;
 }

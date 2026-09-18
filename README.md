@@ -163,6 +163,7 @@ malformada.
 | `SSRF_WHITELIST` | — | Lista separada por vírgulas de domínios/IPs internos permitidos na proteção SSRF (ex: `drive.b2click.com,192.168.0.10`). |
 | `ALLOW_LOCAL_SSRF` | — | `1` desabilita completamente a proteção SSRF contra IPs locais/privados (use com cautela). |
 | `BLUEMINE_NO_WINDOW` | — | `1` impede o app de abrir a janela automaticamente ao iniciar (você abre o endereço no navegador na mão). |
+| `BLUEMINE_NO_TRAY` | — | `1` não cria o ícone na bandeja do Windows (o servidor passa a só ser encerrável pelo Gerenciador de Tarefas). |
 | `LOG_LEVEL` | `info` | Nível mínimo do log estruturado (`debug`\|`info`\|`warn`\|`error`). Segredos são sempre redigidos. |
 | `LOG_FILE` / `LOG_TO_FILE` | `bluemine.log` / `1` | Arquivo de log (alimenta o export de diagnóstico) e liga/desliga (`0`) a gravação em disco. |
 | `UPDATE_GITHUB_REPO` | — | `owner/repo` para usar **GitHub Releases** como canal de auto-update (a Action de release publica o `.exe` + `SHA256SUMS`). Vazio = recurso inerte. |
@@ -173,6 +174,8 @@ malformada.
 | `AI_MODEL_LOCAL` | `llama3.1` | Modelo usado pelo provider de IA local. Os demais modelos/campos custom do Redmine também são configuráveis por env (ver [server/lib/config.js](server/lib/config.js)). |
 
 > Ao iniciar o `bluemine.exe`, o app abre sozinho numa janela dedicada (Edge em *app mode*, sem barra de endereço; se não houver Edge, cai no navegador padrão). Se o exe já estiver rodando, um novo duplo-clique apenas traz a janela de volta em vez de subir outra instância.
+
+> **Ícone na bandeja:** enquanto o servidor roda, fica um ícone do Bluemine na área de notificação do Windows (pode estar escondido atrás da setinha de "ícones ocultos" — arraste-o para a barra para fixar). O menu do botão direito tem **Abrir Bluemine** (mesmo efeito do duplo clique no ícone), **Ver logs do servidor** — uma janela que acompanha o `bluemine.log` ao vivo, com as linhas JSON já formatadas e coloridas por nível, filtro por texto e botão para abrir a pasta — e **Sair**, que encerra o servidor de forma ordenada — antes disso, fechar a janela do app deixava o processo rodando e só o Gerenciador de Tarefas o matava. O ícone some sozinho se o servidor cair. Detalhes em [server/services/tray.js](server/services/tray.js).
 
 > O host de e-mail (Zimbra) vem de `VITE_ZIMBRA_HOST`. Se a variável não estiver definida no build, o campo continua editável na própria interface.
 
@@ -188,7 +191,7 @@ No Windows, com as dependências instaladas:
 ./build_exe.ps1
 ```
 
-O script: gera os ícones, compila o frontend (`client`), copia o `dist` para `server/dist`, e empacota tudo num único **`bluemine.exe`** na raiz (via `pkg`, alvo `node18-win-x64`), gravando o ícone no binário. Basta distribuir o `.exe` — ele embute frontend + backend.
+O script: gera os ícones, compila o frontend (`client`), copia o `dist` para `server/dist`, e empacota tudo num único **`bluemine.exe`** na raiz (via `pkg`, alvo `node18-win-x64`), gravando o ícone no binário. **Atenção:** este pipeline (legado) *não* embute a config — o `.exe` do `pkg` ainda precisa do `.env` ao lado. Use o SEA abaixo.
 
 ### Build via Node SEA (recomendado — sem Node 18)
 
@@ -198,7 +201,20 @@ O `pkg` prende o binário ao **Node 18 (EOL)**. O pipeline alternativo usa **Nod
 ./build_exe_sea.ps1
 ```
 
-O script compila o frontend, **embute a SPA no bundle** (`scripts/embed-dist.cjs`), faz o *bundle* do servidor num único `.cjs` (`esbuild`), gera o blob SEA, copia o binário do Node, injeta o blob (`postject`) e grava o ícone — produzindo um `bluemine.exe` **realmente single-file** (frontend + backend embutidos). Assine o binário (`signtool`) antes de distribuir. O `build_exe.ps1` (pkg) segue disponível como fallback.
+O script compila o frontend, **embute a SPA no bundle** (`scripts/embed-dist.cjs`), **embute a config e a CA interna** (`scripts/embed-config.cjs`), faz o *bundle* do servidor num único `.cjs` (`esbuild`), gera o blob SEA, copia o binário do Node, injeta o blob (`postject`) e grava o ícone — produzindo um `bluemine.exe` **realmente single-file**. Assine o binário (`signtool`) antes de distribuir. O `build_exe.ps1` (pkg) segue disponível como fallback.
+
+### O que vai dentro do `.exe` (e o que não vai)
+
+**Dentro:** frontend, backend, os endereços do `.env` (`VITE_*`, `SSRF_WHITELIST`…) e a CA interna (`server/redmine-ca.pem`). O servidor lê `VITE_ZIMBRA_HOST`/`VITE_DOKUWIKI_HOST`/`SSRF_WHITELIST` em **runtime**, não só no build do front — por isso precisam ser embutidos, senão o e-mail responde 503 e o Talk/Drive é bloqueado pelo guard anti-SSRF na máquina do usuário. Chaves com cara de segredo (`*TOKEN*`, `*PASS*`, `*_KEY`…) são **filtradas** pelo `embed-config.cjs`: o conteúdo embutido fica legível dentro do binário, exatamente como as variáveis `VITE_`.
+
+Para apontar uma instalação para outro Redmine/Zimbra **sem gerar build**, basta um `.env` ao lado do `.exe` — ambiente e `.env` sempre vencem o embutido (`server/lib/embeddedConfig.js`).
+
+**Fora (não dá para embutir):**
+- **Pasta gravável** para cofre, sessões, `bluemine.log` e VAPID. Fica ao lado do `.exe`; se essa pasta não aceitar escrita (ex.: `Program Files`), cai sozinho para `%LOCALAPPDATA%\Bluemine` (`server/lib/runtime.js`).
+- **Acesso de rede**: `drive.b2click.com` resolve para `10.0.200.10` (IP privado) — Talk, Drive e Notas exigem estar na rede interna ou em VPN. Redmine, Zimbra, wiki e Jitsi são públicos.
+- **`powershell.exe` liberado**: o cofre (DPAPI), a bandeja e o auto-update dependem dele.
+- **Assinatura do binário**: sem `signtool`, o SmartScreen avisa na primeira execução.
+- **Credenciais**: o cofre é DPAPI por usuário+máquina — cada pessoa faz login uma vez; copiar a pasta de dados entre máquinas não funciona.
 
 ---
 

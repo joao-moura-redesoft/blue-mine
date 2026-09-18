@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   Bold,
   Italic,
@@ -12,14 +13,17 @@ import {
   Eye,
   Pencil,
   AtSign,
+  Hash,
   Sparkles,
   Loader2,
   FileText,
+  Workflow,
 } from 'lucide-react';
 import { Markdown } from './Markdown';
 import { redmineApi } from '../api/redmine';
 import { getAIKey } from '../utils/aiConfig';
 import { useTemplates } from '../utils/templates';
+import { isIssueRef } from '../utils/issueRef';
 
 interface Member {
   id: number;
@@ -37,6 +41,18 @@ interface Props {
   /** Avisa o pai quando há texto/anexos ainda não enviados (para confirmar antes de fechar) */
   onDirtyChange?: (dirty: boolean) => void;
 }
+
+// Ponto de partida do botão de diagrama: um fluxo mínimo que já renderiza, para
+// a pessoa editar em cima em vez de decorar a sintaxe do Mermaid.
+const MERMAID_SNIPPET = [
+  '```mermaid',
+  'flowchart LR',
+  '  A[Início] --> B{Decisão}',
+  '  B -->|sim| C[Fim]',
+  '  B -->|não| A',
+  '```',
+  '',
+].join('\n');
 
 function fmtSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -69,6 +85,15 @@ function detectMention(value: string, caret: number): { query: string; start: nu
   return { query: m[2], start: caret - m[2].length - 1 };
 }
 
+// Mesma ideia para citar tarefa (#parcial): aceita número ou texto, e a busca
+// resolve os dois — ninguém precisa saber o ID de cabeça.
+function detectIssueRef(value: string, caret: number): { query: string; start: number } | null {
+  const upto = value.slice(0, caret);
+  const m = upto.match(/(^|\s)#([\p{L}0-9._-]*)$/u);
+  if (!m) return null;
+  return { query: m[2], start: caret - m[2].length - 1 };
+}
+
 export function CommentComposer({
   onSubmit,
   sending,
@@ -84,6 +109,8 @@ export function CommentComposer({
   const [dragOver, setDragOver] = useState(false);
   const [mention, setMention] = useState<{ query: string; start: number } | null>(null);
   const [midx, setMidx] = useState(0);
+  const [issueRef, setIssueRef] = useState<{ query: string; start: number } | null>(null);
+  const [ridx, setRidx] = useState(0);
   const [aiReviewing, setAiReviewing] = useState(false);
   const [aiFeedback, setAiFeedback] = useState<string | null>(null);
   const [tplOpen, setTplOpen] = useState(false);
@@ -121,6 +148,7 @@ export function CommentComposer({
     setFiles([]);
     setPreview(false);
     setMention(null);
+    setIssueRef(null);
   }, [storageKey]);
 
   // Injeta texto externo (ex: rascunho gerado por IA) quando prop muda
@@ -153,6 +181,19 @@ export function CommentComposer({
     ? members.filter((m) => m.name.toLowerCase().includes(mention.query.toLowerCase())).slice(0, 6)
     : [];
 
+  // Busca das tarefas para o "#" (mesma rota do vinculador de notas). Se o que
+  // já foi digitado é um ID completo, some com a lista: quem sabe o número não
+  // precisa escolher nada — e aí o Enter volta a ser quebra de linha.
+  const refQuery = issueRef?.query ?? '';
+  const refSearchable = refQuery.trim().length >= 2 && !isIssueRef(refQuery.trim());
+  const { data: refResults = [] } = useQuery({
+    queryKey: ['note-issue-search', refQuery],
+    queryFn: () => redmineApi.searchIssues(refQuery),
+    enabled: refSearchable,
+    staleTime: 30_000,
+  });
+  const refMatches = issueRef && refSearchable ? refResults.slice(0, 6) : [];
+
   // Auto-resize do textarea
   useEffect(() => {
     const ta = taRef.current;
@@ -183,6 +224,7 @@ export function CommentComposer({
     setFiles([]);
     setPreview(false);
     setMention(null);
+    setIssueRef(null);
     if (storageKey) {
       try {
         localStorage.removeItem(storageKey);
@@ -202,6 +244,22 @@ export function CommentComposer({
     const next = before + insert + after;
     setText(next);
     setMention(null);
+    const pos = before.length + insert.length;
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.selectionStart = ta.selectionEnd = pos;
+    });
+  };
+
+  // Insere "#12345 " no lugar do "#parcial" em digitação
+  const insertIssueRef = (id: number) => {
+    const ta = taRef.current;
+    if (!issueRef || !ta) return;
+    const before = text.slice(0, issueRef.start);
+    const after = text.slice(ta.selectionStart);
+    const insert = `#${id} `;
+    setText(before + insert + after);
+    setIssueRef(null);
     const pos = before.length + insert.length;
     requestAnimationFrame(() => {
       ta.focus();
@@ -245,6 +303,11 @@ export function CommentComposer({
     { icon: List, title: 'Lista', action: () => prefixLine('- ') },
     { icon: Code, title: 'Código', action: () => surround('`', '`', 'código') },
     { icon: Link2, title: 'Link', action: () => surround('[', '](url)', 'texto') },
+    {
+      icon: Workflow,
+      title: 'Diagrama (Mermaid) — vai como imagem para o Redmine',
+      action: () => insertText((text && !text.endsWith('\n') ? '\n\n' : '') + MERMAID_SNIPPET),
+    },
   ];
 
   return (
@@ -357,9 +420,11 @@ export function CommentComposer({
             onChange={(e) => {
               setText(e.target.value);
               setMidx(0);
+              setRidx(0);
               setMention(
                 members.length ? detectMention(e.target.value, e.target.selectionStart) : null,
               );
+              setIssueRef(detectIssueRef(e.target.value, e.target.selectionStart));
             }}
             onPaste={(e) => {
               const imgs = Array.from(e.clipboardData.items)
@@ -372,6 +437,28 @@ export function CommentComposer({
               }
             }}
             onKeyDown={(e) => {
+              if (issueRef && refMatches.length) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setRidx((i) => Math.min(i + 1, refMatches.length - 1));
+                  return;
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setRidx((i) => Math.max(i - 1, 0));
+                  return;
+                }
+                if (e.key === 'Enter' || e.key === 'Tab') {
+                  e.preventDefault();
+                  insertIssueRef(refMatches[ridx].id);
+                  return;
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setIssueRef(null);
+                  return;
+                }
+              }
               if (mention && mentionMatches.length) {
                 if (e.key === 'ArrowDown') {
                   e.preventDefault();
@@ -399,10 +486,31 @@ export function CommentComposer({
                 submit();
               }
             }}
-            placeholder="Escreva em Markdown… (@ menciona alguém · convertido para o Redmine ao enviar)"
+            placeholder="Escreva em Markdown… (@ menciona alguém · # cita uma tarefa · convertido para o Redmine ao enviar)"
             rows={2}
             className="w-full text-sm px-3 py-2 resize-none focus:outline-none bg-transparent"
           />
+          {issueRef && refMatches.length > 0 && (
+            <div className="absolute left-2 bottom-1 z-10 w-72 max-w-[calc(100%-1rem)] bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden">
+              <p className="px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-400 border-b border-slate-100 flex items-center gap-1">
+                <Hash size={10} /> Citar tarefa
+              </p>
+              {refMatches.map((r, i) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onMouseEnter={() => setRidx(i)}
+                  onClick={() => insertIssueRef(r.id)}
+                  className={`w-full flex items-center gap-2 text-left px-3 py-1.5 text-sm ${i === ridx ? 'bg-blue-50' : ''}`}
+                >
+                  <span className="font-mono text-[10px] font-bold text-blue-600 flex-shrink-0">
+                    #{r.id}
+                  </span>
+                  <span className="text-slate-700 truncate">{r.subject}</span>
+                </button>
+              ))}
+            </div>
+          )}
           {mention && mentionMatches.length > 0 && (
             <div className="absolute left-2 bottom-1 z-10 w-56 bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden">
               <p className="px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-400 border-b border-slate-100 flex items-center gap-1">

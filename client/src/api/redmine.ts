@@ -151,11 +151,42 @@ api.interceptors.response.use(
   },
 );
 
+// Quanto o servidor teve que cortar na última busca de tarefas. Fica fora do
+// cache do react-query de propósito: ['issues'] é um Issue[] e os updates
+// otimistas dependem disso (ver useUpdateIssueStatus).
+export interface IssuesMeta {
+  truncated: boolean;
+  total: number;
+}
+
+let issuesMeta: IssuesMeta = { truncated: false, total: 0 };
+const metaListeners = new Set<() => void>();
+
+export function getIssuesMeta(): IssuesMeta {
+  return issuesMeta;
+}
+
+export function subscribeIssuesMeta(fn: () => void): () => void {
+  metaListeners.add(fn);
+  return () => void metaListeners.delete(fn);
+}
+
+function setIssuesMeta(next: IssuesMeta) {
+  // Só troca a referência quando muda de verdade: useSyncExternalStore compara
+  // por identidade e re-renderizaria a cada refetch.
+  if (next.truncated === issuesMeta.truncated && next.total === issuesMeta.total) return;
+  issuesMeta = next;
+  metaListeners.forEach((fn) => fn());
+}
+
 export const redmineApi = {
+  // O servidor define o escopo (abertas + fechadas recentes) e pagina tudo:
+  // limit/offset/status_id daqui eram descartados lá.
   getIssues: async (projectId?: number): Promise<Issue[]> => {
-    const params: Record<string, unknown> = { assigned_to_id: 'me', status_id: '*', limit: 100 };
+    const params: Record<string, unknown> = {};
     if (projectId) params.project_id = projectId;
     const { data } = await api.get('/issues', { params });
+    setIssuesMeta({ truncated: !!data.truncated, total: data.total_count ?? 0 });
     return data.issues;
   },
 

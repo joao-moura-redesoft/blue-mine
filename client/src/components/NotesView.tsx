@@ -40,6 +40,7 @@ import { RequiredFieldsModal } from './RequiredFieldsModal';
 import { IssueLinker } from './IssueLinker';
 import { redmineApi } from '../api/redmine';
 import { markdownToTextile } from '../utils/markdownToTextile';
+import { prepareMermaidForRedmine } from '../utils/mermaid';
 import { formatDistanceToNow, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -417,7 +418,11 @@ function NoteEditor({
     setSendState('sending');
     setSendError('');
     try {
-      await redmineApi.addNote(note.linkedIssueId, markdownToTextile(body));
+      // Diagramas Mermaid → PNG anexado + referência (o Redmine não renderiza Mermaid)
+      const mmd = await prepareMermaidForRedmine(body);
+      const uploads = [];
+      for (const f of mmd.files) uploads.push(await redmineApi.uploadFile(f));
+      await redmineApi.addNote(note.linkedIssueId, markdownToTextile(mmd.text), uploads);
       setSendState('sent');
       setTimeout(() => setSendState('idle'), 2500);
     } catch (err: unknown) {
@@ -447,8 +452,12 @@ function NoteEditor({
     setSendState('sending');
     setSendError('');
     try {
+      const mmd = await prepareMermaidForRedmine(body);
+      const uploads = [];
+      for (const f of mmd.files) uploads.push(await redmineApi.uploadFile(f));
       await redmineApi.updateIssue(note.linkedIssueId, {
-        notes: markdownToTextile(body),
+        notes: markdownToTextile(mmd.text),
+        ...(uploads.length ? { uploads } : {}),
         ...values,
       });
       setPendingRequired(null);

@@ -5,8 +5,10 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronLeft,
+  ArrowLeft,
   Check,
   Pencil,
+  Trash2,
   Play,
   GitBranch,
   ArrowRight,
@@ -39,7 +41,10 @@ import {
   PanelLeftOpen,
   Ban,
 } from 'lucide-react';
-import type { Attachment, EditField, Issue } from '../types/redmine';
+import type { Attachment, EditField, Issue, IssueStatus } from '../types/redmine';
+import { looksClosed, type IssueRefInfo } from '../utils/issueStatus';
+import { parseBlockers } from '../utils/blockers';
+import { useIssueRefs } from '../hooks/useIssueRefs';
 import { RequiredFieldsModal } from './RequiredFieldsModal';
 import { matchMissingFields } from '../utils/requiredFields';
 import { recordRecentIssue } from '../utils/recentIssues';
@@ -52,6 +57,7 @@ import { TalkContactButton } from './TalkContactButton';
 import { PersonAvatar } from './PersonAvatar';
 import { MarkdownEditor } from './MarkdownEditor';
 import { markdownToTextile } from '../utils/markdownToTextile';
+import { prepareMermaidForRedmine } from '../utils/mermaid';
 import { textileToMarkdown } from '../utils/textileToMarkdown';
 import { redmineApi, attachmentUrl, getStoredAuth } from '../api/redmine';
 import { formatDistanceToNow } from 'date-fns';
@@ -75,6 +81,7 @@ import { useJitsiPresence } from '../hooks/useJitsiPresence';
 import { makeTaskRoom } from '../utils/jitsiConfig';
 import { wikiLinks, type WikiLink } from '../utils/wikiLinks';
 import { Markdown } from './Markdown';
+import { IssueRefText } from './IssueRefText';
 import { ActivityLog, JournalAttachments } from './ActivityLog';
 import { ManualWorkflowButton } from './workflow/ManualWorkflowButton';
 import { getMissingFields } from '../utils/alerts';
@@ -119,6 +126,8 @@ function countRejections(issue: {
 
 type PendingNote = {
   id: string;
+  /** Tarefa a que a nota pertence — o modal troca de tarefa sem desmontar */
+  issueId: number;
   text: string;
   status: 'pending' | 'error';
   files?: File[];
@@ -225,6 +234,10 @@ interface Props {
   issueId: number;
   onClose: () => void;
   onNavigate?: (id: number) => void;
+  /** Volta para a tarefa anterior da trilha (undefined = cheguei aqui direto) */
+  onBack?: () => void;
+  /** ID para onde o "voltar" leva, só para rotular o botão */
+  backToId?: number;
   /** Cria uma nova nota pré-vinculada a esta tarefa e abre o módulo de Notas */
   onNewNote?: (patch: { title?: string; linkedIssueId?: number; linkedProjectId?: number }) => void;
   /** Abre o módulo de Notas filtrado por esta tarefa */
@@ -374,12 +387,14 @@ function DescriptionPanel({
   open,
   onToggle,
   onEdit,
+  onIssueClick,
 }: {
   description?: string;
   attachments: Attachment[];
   open: boolean;
   onToggle: () => void;
   onEdit?: () => void;
+  onIssueClick?: (id: number) => void;
 }) {
   if (!description && attachments.length === 0) return null;
   const imgCount = attachments.filter((a) => a.content_type?.startsWith('image/')).length;
@@ -428,7 +443,12 @@ function DescriptionPanel({
         <div className="px-4 pb-3">
           {description && (
             <div className="bg-white dark:bg-slate-800 rounded-lg p-3 border border-slate-100 dark:border-slate-700 group">
-              <Markdown text={description} attachments={attachments} textile />
+              <Markdown
+                text={description}
+                attachments={attachments}
+                textile
+                onIssueClick={onIssueClick}
+              />
             </div>
           )}
           <TaskAttachments attachments={attachments} />
@@ -562,12 +582,15 @@ function TextField({
   onSave,
   multiline,
   bare,
+  onIssueClick,
 }: {
   label: string;
   value: string;
   onSave: (v: string) => void;
   multiline?: boolean;
   bare?: boolean;
+  /** Torna as referências #12345 do texto clicáveis (quando não está editando) */
+  onIssueClick?: (id: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -620,7 +643,7 @@ function TextField({
         <span
           className={`text-sm font-medium ${value ? 'text-slate-800 dark:text-slate-100' : 'text-slate-300 dark:text-slate-600 italic'} group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors leading-snug`}
         >
-          {value || '—'}
+          {value ? <IssueRefText text={value} onIssueClick={onIssueClick} /> : '—'}
         </span>
         <Pencil
           size={11}
@@ -1825,12 +1848,107 @@ function BlockerButton({
   );
 }
 
+/* ── Impedimentos ──────────────────────────────────────────────────────────
+   Impedimento é comentário nas duas tarefas (parseBlockers lê de volta). Esta
+   faixa mostra a situação ATUAL de cada um: o ponto todo é avisar quando o
+   impedimento já foi resolvido e a tarefa pode andar. */
+function BlockersBanner({
+  journals,
+  selfStatus,
+  statuses,
+  onNavigate,
+}: {
+  journals?: { notes?: string }[];
+  /** Status da própria tarefa: se ela já fechou, o impedimento virou história */
+  selfStatus?: { id: number; name: string };
+  statuses?: IssueStatus[];
+  onNavigate?: (id: number) => void;
+}) {
+  const { blockedBy, blocks } = useMemo(() => parseBlockers(journals), [journals]);
+  const ids = useMemo(() => [...new Set([...blockedBy, ...blocks])], [blockedBy, blocks]);
+  const { byId } = useIssueRefs(ids);
+
+  // is_closed do Redmine quando temos a lista de status; senão, pelo nome.
+  const isClosedStatus = (st?: { id: number; name: string }) => {
+    const known = statuses?.find((s) => s.id === st?.id);
+    return known ? known.is_closed : looksClosed(st?.name);
+  };
+  const isClosed = (info: IssueRefInfo) => isClosedStatus(info.status);
+
+  const Chip = ({ id, info }: { id: number; info: IssueRefInfo | null }) => (
+    <button
+      onClick={() => onNavigate?.(id)}
+      disabled={!onNavigate}
+      className="inline-flex items-baseline gap-1.5 min-w-0 hover:underline disabled:no-underline"
+    >
+      <span className="font-mono font-bold flex-shrink-0">#{id}</span>
+      {info && <span className="truncate">— {info.subject}</span>}
+      {info?.status && <span className="opacity-70 flex-shrink-0">· {info.status.name}</span>}
+    </button>
+  );
+
+  // Tarefa fechada não precisa saber que "dá pra retomar".
+  if (isClosedStatus(selfStatus)) return null;
+
+  const rows: React.ReactNode[] = [];
+  for (const id of blockedBy) {
+    const info = byId.get(id);
+    if (info === null) continue; // referência que não existe: ignora
+    const done = info ? isClosed(info) : false;
+    rows.push(
+      <div
+        key={`b${id}`}
+        className={`flex items-center gap-2 text-xs px-2.5 py-1.5 rounded-lg ${
+          done
+            ? 'bg-green-50 text-green-800 dark:bg-green-900/20 dark:text-green-300'
+            : 'bg-amber-50 text-amber-800 dark:bg-amber-900/20 dark:text-amber-300'
+        }`}
+      >
+        {done ? (
+          <Check size={13} className="flex-shrink-0" />
+        ) : (
+          <Ban size={13} className="flex-shrink-0" />
+        )}
+        <span className="font-semibold flex-shrink-0">
+          {done ? 'Impedimento resolvido:' : 'Impedida por:'}
+        </span>
+        <Chip id={id} info={info ?? null} />
+        {done && <span className="ml-auto flex-shrink-0 font-medium">dá pra retomar</span>}
+      </div>,
+    );
+  }
+  for (const id of blocks) {
+    const info = byId.get(id);
+    if (info === null) continue;
+    if (info && isClosed(info)) continue; // já resolvida do outro lado: não polui
+    rows.push(
+      <div
+        key={`i${id}`}
+        className="flex items-center gap-2 text-xs px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+      >
+        <Ban size={13} className="flex-shrink-0 opacity-60" />
+        <span className="font-semibold flex-shrink-0">Impede:</span>
+        <Chip id={id} info={info ?? null} />
+      </div>,
+    );
+  }
+
+  if (rows.length === 0) return null;
+  return (
+    <div className="px-5 py-2 space-y-1 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+      {rows}
+    </div>
+  );
+}
+
 /* ── Modal principal ── */
 
 export function IssueModal({
   issueId,
   onClose,
   onNavigate,
+  onBack,
+  backToId,
   onNewNote,
   onViewNotes,
   onCreateBlocker,
@@ -1886,10 +2004,15 @@ export function IssueModal({
     baseFields: Record<string, unknown>;
     statusName: string;
     errors: string[];
+    /** O que só pode acontecer se a mudança de status for aceita (ex.: avisar no Talk) */
+    onDone?: () => void;
   } | null>(null);
+  const [histView, setHistView] = useState(() => localStorage.getItem('rk_hist_view') === '1');
+  // Também usado pelo Histórico completo: traduz IDs de campos personalizados
+  // do tipo lista (ex.: "DEV/SUP Natureza") para o texto exibido nas opções.
   const { data: editFields = [], isFetching: editFieldsLoading } = useEditFields(
     { issueId, projectId: issue?.project.id, trackerId: issue?.tracker.id },
-    !!pendingRequired,
+    !!pendingRequired || histView,
   );
   const missingFields = useMemo<EditField[]>(() => {
     if (!pendingRequired) return [];
@@ -1905,13 +2028,23 @@ export function IssueModal({
     text: string;
     original: string;
   } | null>(null);
+  // Redmine não tem "excluir comentário" na API REST — apagamos o texto (PUT notes: '')
+  // e o próprio filtro de notesOnly/ActivityLog já esconde journals com notes vazio.
+  const [confirmDeleteJournal, setConfirmDeleteJournal] = useState<number | null>(null);
+  const deleteJournal = (id: number) => {
+    updateJournal.mutate({ id, notes: '' });
+    setConfirmDeleteJournal(null);
+  };
   const [editingDescription, setEditingDescription] = useState<string | null>(null);
   // Texto original da descrição ao abrir o editor — para saber se houve alteração real.
   const descBaselineRef = useRef('');
   // Composer tem estado interno; ele avisa aqui quando há texto/anexos não enviados.
   const [composerDirty, setComposerDirty] = useState(false);
   // Confirmação antes de fechar quando há edição não salva (perderia o rascunho).
-  const [confirmingClose, setConfirmingClose] = useState(false);
+  // Ação que só acontece depois de confirmar o descarte da edição em andamento
+  // (fechar o modal ou trocar de tarefa — as duas perdem o rascunho inline).
+  const [confirmLeave, setConfirmLeave] = useState<{ run: () => void } | null>(null);
+  const [refCopied, setRefCopied] = useState(false);
   const updateIssue = useUpdateIssue();
   const watchedIds = useLocalWatches();
   const [pendingNotes, setPendingNotes] = useState<PendingNote[]>([]);
@@ -1926,7 +2059,6 @@ export function IssueModal({
     localStorage.setItem('rk_fields_collapsed', fieldsCollapsed ? '1' : '0');
   }, [fieldsCollapsed]);
   const [phaseView, setPhaseView] = useState(() => localStorage.getItem('rk_phase_view') === '1');
-  const [histView, setHistView] = useState(() => localStorage.getItem('rk_hist_view') === '1');
   const [aiDraftNote, setAiDraftNote] = useState<string | undefined>(undefined);
   const [lightbox, setLightbox] = useState<{ images: string[]; index: number } | null>(null);
 
@@ -1951,49 +2083,88 @@ export function IssueModal({
 
   // Fecha, mas pede confirmação se houver rascunho não salvo.
   const requestClose = () => {
-    if (hasUnsavedEdits) setConfirmingClose(true);
+    if (hasUnsavedEdits) setConfirmLeave({ run: onClose });
     else onClose();
   };
+  // Trocar de tarefa também descarta a edição inline (o rascunho do compositor
+  // não entra na conta: ele é salvo por tarefa e volta quando você voltar).
+  const requestNavigate = onNavigate
+    ? (id: number) => {
+        if (descDirty || journalDirty) setConfirmLeave({ run: () => onNavigate(id) });
+        else onNavigate(id);
+      }
+    : undefined;
+  const requestBack = onBack
+    ? () => {
+        if (descDirty || journalDirty) setConfirmLeave({ run: onBack });
+        else onBack();
+      }
+    : undefined;
   // Refs para o handler de Esc sempre enxergar o estado atual sem re-registrar o listener.
   const requestCloseRef = useRef(requestClose);
   requestCloseRef.current = requestClose;
-  const confirmingRef = useRef(confirmingClose);
-  confirmingRef.current = confirmingClose;
+  const confirmingRef = useRef(confirmLeave);
+  confirmingRef.current = confirmLeave;
 
   // Esc fecha o modal (com confirmação se houver rascunho). Se a confirmação já
   // está aberta, Esc apenas volta a editar (cancela o fechamento).
+  // Alt+← volta pela trilha de tarefas visitadas dentro do modal.
+  const onBackRef = useRef(requestBack);
+  onBackRef.current = requestBack;
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (confirmingRef.current) setConfirmingClose(false);
-      else requestCloseRef.current();
+      if (e.key === 'Escape') {
+        if (confirmingRef.current) setConfirmLeave(null);
+        else requestCloseRef.current();
+        return;
+      }
+      if (e.key === 'ArrowLeft' && e.altKey && onBackRef.current) {
+        e.preventDefault();
+        onBackRef.current();
+      }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, []);
 
-  // Recarrega o aviso de campos obrigatórios ao trocar de tarefa.
+  // Trocar de tarefa: recarrega o aviso de campos obrigatórios e ABANDONA as
+  // edições inline em andamento. Sem isso o editor continuaria aberto com o
+  // texto da tarefa anterior e salvaria na tarefa errada.
   useEffect(() => {
     setBlockingErrors(loadIssueBlock(issueId));
+    setEditingDescription(null);
+    setEditingJournal(null);
+    setSavingFields([]);
+    // O popup de campos obrigatórios guarda o payload da tarefa ANTERIOR (e a
+    // pendência de avisar no Talk): reenviar isso na tarefa nova seria errado.
+    setPendingRequired(null);
+    descBaselineRef.current = '';
   }, [issueId]);
 
-  const sendNote = async (text: string, files: File[] = []) => {
+  // targetId fica explícito porque o modal troca de tarefa sem desmontar: uma
+  // nota em voo (ou o retry de uma que falhou) tem que ir para a tarefa em que
+  // foi escrita, não para a que está aberta agora.
+  const sendNote = async (text: string, files: File[] = [], targetId: number = issueId) => {
     const id = Date.now().toString();
-    setPendingNotes((prev) => [...prev, { id, text, status: 'pending', files }]);
+    setPendingNotes((prev) => [...prev, { id, issueId: targetId, text, status: 'pending', files }]);
     try {
+      // Diagramas Mermaid: o Redmine não os conhece, então cada um vira um PNG
+      // anexado + a referência à imagem no texto. Sem isso, quem abre a tarefa
+      // fora do Bluemine só vê o código-fonte do diagrama.
+      const mmd = await prepareMermaidForRedmine(text);
       const uploads = [];
-      for (const f of files) uploads.push(await redmineApi.uploadFile(f));
-      const notes = markdownToTextile(text);
-      await addNote.mutateAsync({ id: issueId, notes, uploads });
+      for (const f of [...files, ...mmd.files]) uploads.push(await redmineApi.uploadFile(f));
+      const notes = markdownToTextile(mmd.text);
+      await addNote.mutateAsync({ id: targetId, notes, uploads });
       setPendingNotes((prev) => prev.filter((n) => n.id !== id));
-      setBlockingErrors([]);
-      saveIssueBlock(issueId, []); // salvou → destrava o aviso
+      if (targetId === issueId) setBlockingErrors([]);
+      saveIssueBlock(targetId, []); // salvou → destrava o aviso
       // Compartilha arquivos na sala Talk ativa (se houver)
       if (files.length > 0 && talkBridge.hasReceiver()) {
         for (const f of files) talkBridge.shareFile(f).catch(() => {});
       }
       // Avisa no Talk quem foi @mencionado no comentário (melhor esforço).
-      if (issue) {
+      if (issue && issue.id === targetId) {
         const mentioned = (members ?? []).filter(
           (m) => m.id !== currentUser?.id && text.includes(`@${m.name}`),
         );
@@ -2015,15 +2186,15 @@ export function IssueModal({
         prev.map((n) => (n.id === id ? { ...n, status: 'error', error: msg } : n)),
       );
       if (Array.isArray(errs) && errs.length) {
-        setBlockingErrors(errs);
-        saveIssueBlock(issueId, errs);
+        if (targetId === issueId) setBlockingErrors(errs);
+        saveIssueBlock(targetId, errs);
       }
     }
   };
 
   const retryNote = (pending: PendingNote) => {
     setPendingNotes((prev) => prev.filter((n) => n.id !== pending.id));
-    sendNote(pending.text, pending.files);
+    sendNote(pending.text, pending.files, pending.issueId);
   };
 
   const dismissNote = (id: string) => setPendingNotes((prev) => prev.filter((n) => n.id !== id));
@@ -2074,7 +2245,42 @@ export function IssueModal({
     return Object.keys(patch).length ? patch : undefined;
   };
 
-  const trackField = (key: string, label: string, fields: Record<string, unknown>) => {
+  // `onDone` só roda se o Redmine ACEITAR a mudança. Importa para os avisos no
+  // Talk: o Redmine recusa a mudança de status quando falta campo obrigatório, e
+  // o revisor não pode receber "te mandei pra revisão" de uma tarefa que ficou
+  // parada. Se cair no popup de campos obrigatórios, a pendência viaja junto e
+  // só é cumprida quando o reenvio passar — se a pessoa desistir, ninguém é
+  // avisado.
+  /**
+   * Converte um texto para Textile já resolvendo os diagramas Mermaid: cada um
+   * é rasterizado em PNG e anexado À TAREFA, e a cerca vira `!arquivo.png!`.
+   *
+   * Anexar na tarefa (e não na nota) é o que viabiliza os caminhos de EDIÇÃO —
+   * a API de journals só aceita `notes`, sem uploads — e o Redmine resolve
+   * `!arquivo.png!` contra os anexos da tarefa do mesmo jeito.
+   *
+   * Falha de upload não bloqueia o salvamento: cai para o texto sem imagem.
+   */
+  const toTextileWithDiagrams = async (raw: string): Promise<string> => {
+    try {
+      const mmd = await prepareMermaidForRedmine(raw);
+      if (mmd.files.length === 0) return markdownToTextile(mmd.text);
+      const uploads = [];
+      for (const f of mmd.files) uploads.push(await redmineApi.uploadFile(f));
+      await updateIssue.mutateAsync({ id: issueId, fields: { uploads } });
+      return markdownToTextile(mmd.text);
+    } catch (err) {
+      console.warn('[mermaid] falha ao anexar diagramas; salvando texto sem imagem', err);
+      return markdownToTextile(raw);
+    }
+  };
+
+  const trackField = (
+    key: string,
+    label: string,
+    fields: Record<string, unknown>,
+    onDone?: () => void,
+  ) => {
     setSavingFields((prev) => [
       ...prev.filter((f) => f.key !== key),
       { key, label, status: 'saving' },
@@ -2085,6 +2291,7 @@ export function IssueModal({
         onSuccess: () => {
           setSavingFields((prev) => prev.filter((f) => f.key !== key));
           setPendingRequired(null); // fecha o popup se este foi um reenvio bem-sucedido
+          onDone?.();
         },
         onError: (err: unknown) => {
           // 422 com lista de erros numa mudança de status → campos obrigatórios em branco.
@@ -2093,7 +2300,12 @@ export function IssueModal({
           if (resp?.status === 422 && Array.isArray(resp.data?.errors) && fields.status_id) {
             setSavingFields((prev) => prev.filter((f) => f.key !== key)); // sem indicador de erro vermelho
             const statusName = statuses?.find((s) => s.id === Number(fields.status_id))?.name ?? '';
-            setPendingRequired({ baseFields: fields, statusName, errors: resp.data!.errors! });
+            setPendingRequired({
+              baseFields: fields,
+              statusName,
+              errors: resp.data!.errors!,
+              onDone,
+            });
             return;
           }
           setSavingFields((prev) =>
@@ -2105,9 +2317,9 @@ export function IssueModal({
     );
   };
 
-  const updateField = (fields: Record<string, unknown>) => {
+  const updateField = (fields: Record<string, unknown>, onDone?: () => void) => {
     const label = fields.status_id ? 'Status' : Object.keys(fields)[0];
-    trackField(label, label, fields);
+    trackField(label, label, fields, onDone);
   };
 
   const updateCustomField = (cfId: number, value: string) => {
@@ -2246,6 +2458,16 @@ export function IssueModal({
         >
           {/* Header */}
           <div className="flex items-start justify-between p-5 pb-3 border-b border-slate-200 dark:border-slate-700">
+            {/* Voltar pela trilha de tarefas abertas de dentro do modal */}
+            {onBack && (
+              <button
+                onClick={requestBack}
+                title={`Voltar para #${backToId} (Alt+←)`}
+                className="mr-2 mt-0.5 p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors flex-shrink-0"
+              >
+                <ArrowLeft size={16} />
+              </button>
+            )}
             <div className="flex-1 min-w-0 pr-4">
               {isLoading ? (
                 <div className="h-5 bg-slate-200 dark:bg-slate-700/50 animate-pulse rounded w-3/4" />
@@ -2265,6 +2487,30 @@ export function IssueModal({
                     >
                       <ExternalLink size={11} />
                     </a>
+                    {/* Copia "#92313 — assunto" pra colar no Talk (que já vira chip lá) */}
+                    {issue && (
+                      <button
+                        onClick={() => {
+                          navigator.clipboard
+                            ?.writeText(`#${issue.id} — ${issue.subject}`)
+                            .then(() => {
+                              setRefCopied(true);
+                              setTimeout(() => setRefCopied(false), 1500);
+                            })
+                            .catch(() => {
+                              /* sem permissão de clipboard: não finge que copiou */
+                            });
+                        }}
+                        title="Copiar referência da tarefa"
+                        className="text-slate-400 hover:text-blue-600 dark:hover:text-blue-400"
+                      >
+                        {refCopied ? (
+                          <Check size={11} className="text-green-500" />
+                        ) : (
+                          <Copy size={11} />
+                        )}
+                      </button>
+                    )}
                   </div>
                   <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100 leading-snug">
                     {issue?.subject}
@@ -2396,6 +2642,16 @@ export function IssueModal({
               </button>
             </div>
           </div>
+
+          {/* Impedimentos ativos (e os que já foram resolvidos) */}
+          {issue && (
+            <BlockersBanner
+              journals={issue.journals}
+              selfStatus={issue.status}
+              statuses={statuses}
+              onNavigate={requestNavigate}
+            />
+          )}
 
           {/* Body: dois painéis (detalhe | chat) */}
           {isLoading || !issue ? (
@@ -2591,6 +2847,7 @@ export function IssueModal({
                         value={cfStr(CF.NOTA_VERSAO)}
                         onSave={(v) => updateCustomField(CF.NOTA_VERSAO, v)}
                         multiline
+                        onIssueClick={requestNavigate}
                       />
                     </FieldRow>
                     <FieldRow icon={<Calendar size={14} />} label="Previsão revisão">
@@ -2650,20 +2907,24 @@ export function IssueModal({
                       currentDate={cfStr(CF.PREVISAO_REVISAO)}
                       members={members ?? []}
                       onConfirm={(revisorId, date, notifyTalk) => {
-                        updateField({
-                          status_id: 71,
-                          assigned_to_id: revisorId ? parseInt(revisorId) : '',
-                          custom_fields: [
-                            { id: CF.REVISOR, value: revisorId },
-                            { id: CF.PREVISAO_REVISAO, value: date },
-                          ],
-                        });
-                        if (revisorId && notifyTalk) {
-                          void notifyOnTalk(
-                            parseInt(revisorId),
-                            `Te enviei a tarefa #${issue.id} ${issue.subject} pra revisão.`,
-                          );
-                        }
+                        updateField(
+                          {
+                            status_id: 71,
+                            assigned_to_id: revisorId ? parseInt(revisorId) : '',
+                            custom_fields: [
+                              { id: CF.REVISOR, value: revisorId },
+                              { id: CF.PREVISAO_REVISAO, value: date },
+                            ],
+                          },
+                          // só avisa se a tarefa REALMENTE foi para revisão
+                          revisorId && notifyTalk
+                            ? () =>
+                                void notifyOnTalk(
+                                  parseInt(revisorId),
+                                  `Te enviei a tarefa #${issue.id} ${issue.subject} pra revisão.`,
+                                )
+                            : undefined,
+                        );
                       }}
                     />
                   </div>
@@ -2688,30 +2949,36 @@ export function IssueModal({
                           canApprove={canApprove}
                           canReject={canReject}
                           onApprove={(note, notifyTalk) => {
-                            updateField({
-                              status_id: 35,
-                              ...(integrador ? { assigned_to_id: integrador.id } : {}),
-                              ...(note.trim() ? { notes: note.trim() } : {}),
-                            });
-                            if (integrador && notifyTalk) {
-                              void notifyOnTalk(
-                                integrador.id,
-                                `Tarefa #${issue.id} ${issue.subject} foi aprovada na revisão e é sua pra integrar.${note.trim() ? ` Nota: ${note.trim()}` : ''}`,
-                              );
-                            }
+                            updateField(
+                              {
+                                status_id: 35,
+                                ...(integrador ? { assigned_to_id: integrador.id } : {}),
+                                ...(note.trim() ? { notes: note.trim() } : {}),
+                              },
+                              integrador && notifyTalk
+                                ? () =>
+                                    void notifyOnTalk(
+                                      integrador.id,
+                                      `Tarefa #${issue.id} ${issue.subject} foi aprovada na revisão e é sua pra integrar.${note.trim() ? ` Nota: ${note.trim()}` : ''}`,
+                                    )
+                                : undefined,
+                            );
                           }}
                           onReject={(assigneeId, note, notifyTalk) => {
-                            updateField({
-                              status_id: 34,
-                              assigned_to_id: assigneeId ? parseInt(assigneeId) : '',
-                              ...(note.trim() ? { notes: note.trim() } : {}),
-                            });
-                            if (assigneeId && notifyTalk) {
-                              void notifyOnTalk(
-                                parseInt(assigneeId),
-                                `Tarefa #${issue.id} ${issue.subject} foi reprovada na revisão e voltou pra você.${note.trim() ? ` Motivo: ${note.trim()}` : ''}`,
-                              );
-                            }
+                            updateField(
+                              {
+                                status_id: 34,
+                                assigned_to_id: assigneeId ? parseInt(assigneeId) : '',
+                                ...(note.trim() ? { notes: note.trim() } : {}),
+                              },
+                              assigneeId && notifyTalk
+                                ? () =>
+                                    void notifyOnTalk(
+                                      parseInt(assigneeId),
+                                      `Tarefa #${issue.id} ${issue.subject} foi reprovada na revisão e voltou pra você.${note.trim() ? ` Motivo: ${note.trim()}` : ''}`,
+                                    )
+                                : undefined,
+                            );
                           }}
                         />
                       </div>
@@ -2746,7 +3013,7 @@ export function IssueModal({
                 <ChecklistSection issueId={issue.id} />
 
                 {/* Tarefas relacionadas e subtarefas */}
-                <RelatedIssues issue={issue} onNavigate={onNavigate} />
+                <RelatedIssues issue={issue} onNavigate={requestNavigate} />
 
                 {/* Páginas da Wiki vinculadas */}
                 <WikiLinksSection issueId={issue.id} />
@@ -2770,19 +3037,21 @@ export function IssueModal({
                         autoFocus
                         placeholder="Escreva em Markdown… (convertido para o Redmine ao salvar)"
                         onSubmit={() => {
-                          trackField('description', 'Descrição', {
-                            description: markdownToTextile(editingDescription),
-                          });
+                          const md = editingDescription;
                           setEditingDescription(null);
+                          void toTextileWithDiagrams(md).then((description) =>
+                            trackField('description', 'Descrição', { description }),
+                          );
                         }}
                       />
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => {
-                            trackField('description', 'Descrição', {
-                              description: markdownToTextile(editingDescription),
-                            });
+                            const md = editingDescription;
                             setEditingDescription(null);
+                            void toTextileWithDiagrams(md).then((description) =>
+                              trackField('description', 'Descrição', { description }),
+                            );
                           }}
                           className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 text-white text-xs font-medium rounded-lg"
                         >
@@ -2811,6 +3080,7 @@ export function IssueModal({
                         setEditingDescription(md);
                         setShowDescription(true);
                       }}
+                      onIssueClick={requestNavigate}
                     />
                   )}
 
@@ -2879,8 +3149,10 @@ export function IssueModal({
                         statuses={statuses}
                         members={members}
                         issue={issue}
+                        editFields={editFields}
                         onOpenTalk={onOpenTalk}
                         openingTalkFor={openingTalkFor}
+                        onIssueClick={requestNavigate}
                       />
                     )}
 
@@ -2914,6 +3186,7 @@ export function IssueModal({
                             <div className="p-3 space-y-3">
                               {phase.journals.map((journal) => {
                                 const isEditing = editingJournal?.id === journal.id;
+                                const isConfirmingDelete = confirmDeleteJournal === journal.id;
                                 const isMine = journal.user.id === currentUser?.id;
                                 return (
                                   <div key={journal.id} className="flex gap-3 group">
@@ -2936,23 +3209,51 @@ export function IssueModal({
                                             locale: ptBR,
                                           })}
                                         </span>
-                                        {isMine && !isEditing && (
-                                          <button
-                                            onClick={() =>
-                                              setEditingJournal({
-                                                id: journal.id,
-                                                text: textileToMarkdown(journal.notes),
-                                                original: textileToMarkdown(journal.notes),
-                                              })
-                                            }
-                                            className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
-                                            title="Editar comentário"
-                                          >
-                                            <Pencil size={12} />
-                                          </button>
+                                        {isMine && !isEditing && !isConfirmingDelete && (
+                                          <>
+                                            <button
+                                              onClick={() =>
+                                                setEditingJournal({
+                                                  id: journal.id,
+                                                  text: textileToMarkdown(journal.notes),
+                                                  original: textileToMarkdown(journal.notes),
+                                                })
+                                              }
+                                              className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                                              title="Editar comentário"
+                                            >
+                                              <Pencil size={12} />
+                                            </button>
+                                            <button
+                                              onClick={() => setConfirmDeleteJournal(journal.id)}
+                                              className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                                              title="Excluir comentário"
+                                            >
+                                              <Trash2 size={12} />
+                                            </button>
+                                          </>
                                         )}
                                       </div>
-                                      {isEditing ? (
+                                      {isConfirmingDelete ? (
+                                        <div className="flex items-center gap-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl px-3 py-2">
+                                          <span className="text-xs text-red-700 dark:text-red-300 flex-1">
+                                            Excluir este comentário?
+                                          </span>
+                                          <button
+                                            onClick={() => deleteJournal(journal.id)}
+                                            disabled={updateJournal.isPending}
+                                            className="px-2 py-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg"
+                                          >
+                                            Excluir
+                                          </button>
+                                          <button
+                                            onClick={() => setConfirmDeleteJournal(null)}
+                                            className="px-2 py-1 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 border border-slate-200 dark:border-slate-600 rounded-lg"
+                                          >
+                                            Cancelar
+                                          </button>
+                                        </div>
+                                      ) : isEditing ? (
                                         <div className="space-y-1.5">
                                           <MarkdownEditor
                                             value={editingJournal.text}
@@ -2965,21 +3266,21 @@ export function IssueModal({
                                             autoFocus
                                             minHeight={90}
                                             onSubmit={() => {
-                                              updateJournal.mutate({
-                                                id: journal.id,
-                                                notes: markdownToTextile(editingJournal.text),
-                                              });
+                                              const md = editingJournal.text;
                                               setEditingJournal(null);
+                                              void toTextileWithDiagrams(md).then((notes) =>
+                                                updateJournal.mutate({ id: journal.id, notes }),
+                                              );
                                             }}
                                           />
                                           <div className="flex items-center gap-2">
                                             <button
                                               onClick={() => {
-                                                updateJournal.mutate({
-                                                  id: journal.id,
-                                                  notes: markdownToTextile(editingJournal.text),
-                                                });
+                                                const md = editingJournal.text;
                                                 setEditingJournal(null);
+                                                void toTextileWithDiagrams(md).then((notes) =>
+                                                  updateJournal.mutate({ id: journal.id, notes }),
+                                                );
                                               }}
                                               disabled={updateJournal.isPending}
                                               className="flex items-center gap-1 px-3 py-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-50 text-white text-xs font-medium rounded-lg"
@@ -3004,6 +3305,7 @@ export function IssueModal({
                                               text={journal.notes}
                                               attachments={issue.attachments}
                                               textile
+                                              onIssueClick={requestNavigate}
                                             />
                                           </div>
                                           <JournalAttachments
@@ -3031,6 +3333,7 @@ export function IssueModal({
                       !phaseView &&
                       notesOnly.map((journal) => {
                         const isEditing = editingJournal?.id === journal.id;
+                        const isConfirmingDelete = confirmDeleteJournal === journal.id;
                         const isMine = journal.user.id === currentUser?.id;
                         return (
                           <div key={journal.id} className="flex gap-3 group">
@@ -3053,23 +3356,51 @@ export function IssueModal({
                                     locale: ptBR,
                                   })}
                                 </span>
-                                {isMine && !isEditing && (
-                                  <button
-                                    onClick={() =>
-                                      setEditingJournal({
-                                        id: journal.id,
-                                        text: textileToMarkdown(journal.notes),
-                                        original: textileToMarkdown(journal.notes),
-                                      })
-                                    }
-                                    className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
-                                    title="Editar comentário"
-                                  >
-                                    <Pencil size={12} />
-                                  </button>
+                                {isMine && !isEditing && !isConfirmingDelete && (
+                                  <>
+                                    <button
+                                      onClick={() =>
+                                        setEditingJournal({
+                                          id: journal.id,
+                                          text: textileToMarkdown(journal.notes),
+                                          original: textileToMarkdown(journal.notes),
+                                        })
+                                      }
+                                      className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                                      title="Editar comentário"
+                                    >
+                                      <Pencil size={12} />
+                                    </button>
+                                    <button
+                                      onClick={() => setConfirmDeleteJournal(journal.id)}
+                                      className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                                      title="Excluir comentário"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  </>
                                 )}
                               </div>
-                              {isEditing ? (
+                              {isConfirmingDelete ? (
+                                <div className="flex items-center gap-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl px-3 py-2">
+                                  <span className="text-xs text-red-700 dark:text-red-300 flex-1">
+                                    Excluir este comentário?
+                                  </span>
+                                  <button
+                                    onClick={() => deleteJournal(journal.id)}
+                                    disabled={updateJournal.isPending}
+                                    className="px-2 py-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg"
+                                  >
+                                    Excluir
+                                  </button>
+                                  <button
+                                    onClick={() => setConfirmDeleteJournal(null)}
+                                    className="px-2 py-1 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 border border-slate-200 dark:border-slate-600 rounded-lg"
+                                  >
+                                    Cancelar
+                                  </button>
+                                </div>
+                              ) : isEditing ? (
                                 <div className="space-y-1.5">
                                   <MarkdownEditor
                                     value={editingJournal.text}
@@ -3082,21 +3413,21 @@ export function IssueModal({
                                     autoFocus
                                     minHeight={90}
                                     onSubmit={() => {
-                                      updateJournal.mutate({
-                                        id: journal.id,
-                                        notes: markdownToTextile(editingJournal.text),
-                                      });
+                                      const md = editingJournal.text;
                                       setEditingJournal(null);
+                                      void toTextileWithDiagrams(md).then((notes) =>
+                                        updateJournal.mutate({ id: journal.id, notes }),
+                                      );
                                     }}
                                   />
                                   <div className="flex items-center gap-2">
                                     <button
                                       onClick={() => {
-                                        updateJournal.mutate({
-                                          id: journal.id,
-                                          notes: markdownToTextile(editingJournal.text),
-                                        });
+                                        const md = editingJournal.text;
                                         setEditingJournal(null);
+                                        void toTextileWithDiagrams(md).then((notes) =>
+                                          updateJournal.mutate({ id: journal.id, notes }),
+                                        );
                                       }}
                                       disabled={updateJournal.isPending}
                                       className="flex items-center gap-1 px-3 py-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-sm shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-50 text-white text-xs font-medium rounded-lg"
@@ -3121,6 +3452,7 @@ export function IssueModal({
                                       text={journal.notes}
                                       attachments={issue.attachments}
                                       textile
+                                      onIssueClick={requestNavigate}
                                     />
                                   </div>
                                   <JournalAttachments
@@ -3134,76 +3466,78 @@ export function IssueModal({
                         );
                       })}
 
-                    {/* Notas pendentes (optimistic) */}
-                    {pendingNotes.map((pending) => (
-                      <div key={pending.id} className="flex gap-3">
-                        <div
-                          className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5 ${
-                            pending.status === 'pending'
-                              ? 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
-                              : 'bg-red-100 dark:bg-red-900/30 text-red-500 dark:text-red-400'
-                          }`}
-                        >
-                          {currentUser
-                            ? `${currentUser.firstname.charAt(0)}${currentUser.lastname.charAt(0)}`
-                            : '?'}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-xs font-semibold text-slate-400">
-                              {currentUser
-                                ? `${currentUser.firstname} ${currentUser.lastname}`
-                                : 'Você'}
-                            </span>
-                            {pending.status === 'pending' && (
-                              <span className="flex items-center gap-1 text-xs text-slate-400">
-                                <Loader2 size={10} className="animate-spin" />
-                                Enviando…
-                              </span>
-                            )}
-                            {pending.status === 'error' && (
-                              <span className="flex items-center gap-1 text-xs text-red-500 dark:text-red-400">
-                                <AlertCircle size={10} />
-                                {pending.error ? 'Não foi possível salvar' : 'Falhou ao enviar'}
-                                <button
-                                  onClick={() => retryNote(pending)}
-                                  className="flex items-center gap-0.5 underline hover:text-red-700 dark:hover:text-red-300 ml-1"
-                                >
-                                  <RotateCcw size={10} /> Tentar novamente
-                                </button>
-                                <button
-                                  onClick={() => dismissNote(pending.id)}
-                                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 ml-1"
-                                >
-                                  <X size={10} />
-                                </button>
-                              </span>
-                            )}
-                          </div>
-                          {pending.status === 'error' && pending.error && (
-                            <p className="text-[11px] text-red-500 dark:text-red-400 mb-1 whitespace-pre-wrap">
-                              ⚠ {pending.error}
-                            </p>
-                          )}
+                    {/* Notas pendentes (optimistic) — só as desta tarefa */}
+                    {pendingNotes
+                      .filter((pending) => pending.issueId === issueId)
+                      .map((pending) => (
+                        <div key={pending.id} className="flex gap-3">
                           <div
-                            className={`rounded-xl rounded-tl-sm px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap transition-colors ${
+                            className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5 ${
                               pending.status === 'pending'
-                                ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
-                                : 'bg-red-50 dark:bg-red-950/30 text-slate-700 dark:text-slate-200 border border-red-200 dark:border-red-800'
+                                ? 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+                                : 'bg-red-100 dark:bg-red-900/30 text-red-500 dark:text-red-400'
                             }`}
                           >
-                            {pending.text}
-                            {pending.files && pending.files.length > 0 && (
-                              <span
-                                className={`flex items-center gap-1 text-xs text-slate-400 ${pending.text ? 'mt-1' : ''}`}
-                              >
-                                <Link2 size={11} /> {pending.files.length} anexo(s)
+                            {currentUser
+                              ? `${currentUser.firstname.charAt(0)}${currentUser.lastname.charAt(0)}`
+                              : '?'}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-xs font-semibold text-slate-400">
+                                {currentUser
+                                  ? `${currentUser.firstname} ${currentUser.lastname}`
+                                  : 'Você'}
                               </span>
+                              {pending.status === 'pending' && (
+                                <span className="flex items-center gap-1 text-xs text-slate-400">
+                                  <Loader2 size={10} className="animate-spin" />
+                                  Enviando…
+                                </span>
+                              )}
+                              {pending.status === 'error' && (
+                                <span className="flex items-center gap-1 text-xs text-red-500 dark:text-red-400">
+                                  <AlertCircle size={10} />
+                                  {pending.error ? 'Não foi possível salvar' : 'Falhou ao enviar'}
+                                  <button
+                                    onClick={() => retryNote(pending)}
+                                    className="flex items-center gap-0.5 underline hover:text-red-700 dark:hover:text-red-300 ml-1"
+                                  >
+                                    <RotateCcw size={10} /> Tentar novamente
+                                  </button>
+                                  <button
+                                    onClick={() => dismissNote(pending.id)}
+                                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 ml-1"
+                                  >
+                                    <X size={10} />
+                                  </button>
+                                </span>
+                              )}
+                            </div>
+                            {pending.status === 'error' && pending.error && (
+                              <p className="text-[11px] text-red-500 dark:text-red-400 mb-1 whitespace-pre-wrap">
+                                ⚠ {pending.error}
+                              </p>
                             )}
+                            <div
+                              className={`rounded-xl rounded-tl-sm px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap transition-colors ${
+                                pending.status === 'pending'
+                                  ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
+                                  : 'bg-red-50 dark:bg-red-950/30 text-slate-700 dark:text-slate-200 border border-red-200 dark:border-red-800'
+                              }`}
+                            >
+                              {pending.text}
+                              {pending.files && pending.files.length > 0 && (
+                                <span
+                                  className={`flex items-center gap-1 text-xs text-slate-400 ${pending.text ? 'mt-1' : ''}`}
+                                >
+                                  <Link2 size={11} /> {pending.files.length} anexo(s)
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
                   </div>
                 </div>
                 {/* Composer fixo no rodapé do painel de chat */}
@@ -3253,13 +3587,15 @@ export function IssueModal({
           loading={editFieldsLoading}
           saving={updateIssue.isPending}
           onCancel={() => setPendingRequired(null)}
-          onSubmit={(values) => updateField(mergeFields(pendingRequired.baseFields, values))}
+          onSubmit={(values) =>
+            updateField(mergeFields(pendingRequired.baseFields, values), pendingRequired.onDone)
+          }
         />
       )}
-      {confirmingClose && (
+      {confirmLeave && (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center p-4 modal-backdrop"
-          onClick={() => setConfirmingClose(false)}
+          onClick={() => setConfirmLeave(null)}
         >
           <div
             className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm p-5"
@@ -3271,25 +3607,26 @@ export function IssueModal({
               </div>
               <div className="min-w-0">
                 <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  Sair sem salvar?
+                  Descartar o que não foi salvo?
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                  Você tem uma edição em andamento que ainda não foi salva. Se sair agora, o
-                  rascunho será perdido.
+                  Você tem uma edição em andamento que ainda não foi salva. Se sair desta tarefa
+                  agora, o rascunho será perdido.
                 </p>
               </div>
             </div>
             <div className="flex items-center justify-end gap-2 mt-4">
               <button
-                onClick={() => setConfirmingClose(false)}
+                onClick={() => setConfirmLeave(null)}
                 className="px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-800 dark:hover:text-slate-100 border border-slate-200 dark:border-slate-600 rounded-lg"
               >
                 Continuar editando
               </button>
               <button
                 onClick={() => {
-                  setConfirmingClose(false);
-                  onClose();
+                  const { run } = confirmLeave;
+                  setConfirmLeave(null);
+                  run();
                 }}
                 className="px-3 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg"
               >

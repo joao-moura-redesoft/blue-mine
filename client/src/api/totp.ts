@@ -41,3 +41,16 @@ export async function migrateLegacyTotp(): Promise<void> {
     /* ignora */
   }
 }
+
+export interface TotpExport {
+  name: string;
+  secret: string;
+  uri: string;
+}
+
+// Busca a semente para levar a conta a outro dispositivo. Só é chamada sob
+// ação explícita do usuário — o resto do app nunca vê a semente.
+export async function exportTotp(id: string): Promise<TotpExport> {
+  const { data } = await axios.get(`/api/secrets/totp/${id}/export`);
+  return data;
+}

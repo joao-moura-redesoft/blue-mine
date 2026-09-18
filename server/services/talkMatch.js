@@ -22,6 +22,49 @@ const store = createJsonStore('talk-match-cache.json', {
   fallback: { updatedAt: 0, byRedmineId: {}, byNcUid: {} },
 });
 
+// Contas do Nextcloud que já se provaram mortas (desativadas/apagadas) na hora de
+// enviar. Ficam de fora do cruzamento: quando alguém troca de conta, a antiga
+// continua no catálogo com o mesmo nome, e sem esta lista o nome seria ambíguo
+// (ou pior, casaria justamente com a morta) para sempre.
+const deadStore = createJsonStore('talk-dead-accounts.json', {
+  fallback: { uids: {}, suspects: {} },
+});
+
+/** Marca um ncUid como conta inativa e o tira do cruzamento na próxima montagem. */
+function markDeadNcUid(ncUid, reason = '') {
+  if (!ncUid) return;
+  const uids = deadStore.data.uids || (deadStore.data.uids = {});
+  if (uids[ncUid]) return;
+  uids[ncUid] = { at: Date.now(), reason };
+  if (deadStore.data.suspects) delete deadStore.data.suspects[ncUid];
+  deadStore.save();
+  // O cruzamento em cache ainda aponta pra ela: invalida para a próxima consulta
+  // remontar já sem a conta morta.
+  store.data.updatedAt = 0;
+  store.save();
+}
+
+/**
+ * Suspeita levantada por sinal INDIRETO (sala sem nome). Uma leitura ruim não
+ * pode apagar uma pessoa do cruzamento para sempre, então só na segunda vez a
+ * conta é dada como morta. O envio já é evitado desde a primeira.
+ */
+function suspectDeadNcUid(ncUid, reason = '') {
+  if (!ncUid) return;
+  const suspects = deadStore.data.suspects || (deadStore.data.suspects = {});
+  const strikes = (suspects[ncUid]?.strikes || 0) + 1;
+  if (strikes >= 2) {
+    markDeadNcUid(ncUid, reason);
+    return;
+  }
+  suspects[ncUid] = { strikes, at: Date.now(), reason };
+  deadStore.save();
+}
+
+function isDeadNcUid(ncUid) {
+  return !!deadStore.data.uids?.[ncUid];
+}
+
 function normName(s) {
   return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
 }
@@ -85,10 +128,13 @@ async function fetchAddressBookContacts(uid) {
 // redmine: instância axios já autenticada (makeRedmine(req) no fluxo HTTP,
 // redmineClient(rec) no motor de automações).
 async function buildMatches(uid, redmine) {
-  const [contacts, redmineUsers] = await Promise.all([
+  const [allContacts, redmineUsers] = await Promise.all([
     fetchAddressBookContacts(uid),
     listAllUsers(redmine),
   ]);
+  // Fora as contas já provadas mortas (ver markDeadNcUid): tirando elas, o nome
+  // de quem migrou volta a casar com uma única conta — a nova.
+  const contacts = allContacts.filter((c) => !isDeadNcUid(c.uid));
 
   const byExactName = new Map();
   for (const c of contacts) {
@@ -147,4 +193,4 @@ async function getMatches(uid, redmine, { forceRefresh = false } = {}) {
   return store.data;
 }
 
-module.exports = { getMatches, buildMatches };
+module.exports = { getMatches, buildMatches, markDeadNcUid, suspectDeadNcUid, isDeadNcUid };

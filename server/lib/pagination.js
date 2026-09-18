@@ -36,22 +36,31 @@ async function mapLimit(items, limit, fn) {
   return out;
 }
 
-// Busca TODAS as páginas de issues para um conjunto de filtros (remove o teto de 100).
-// Trava de segurança em 2000 para não varrer bases enormes sem querer.
-async function fetchAllIssues(redmine, params) {
+// Trava de segurança: 20 páginas. Não varre bases enormes sem querer.
+const MAX_ISSUES = 2000;
+
+// Busca TODAS as páginas de issues para um conjunto de filtros (remove o teto de 100)
+// e diz quanto ficou de fora. `truncated` é o que interessa: antes o corte no
+// MAX_ISSUES era mudo — a tela recebia um pedaço achando que era o todo.
+async function fetchAllIssuesMeta(redmine, params, max = MAX_ISSUES) {
   const limit = 100;
-  const MAX = 2000;
   let offset = 0,
     all = [],
     total = Infinity;
-  while (offset < total && all.length < MAX) {
+  while (offset < total && all.length < max) {
     const { data } = await redmine.get('/issues.json', { params: { ...params, limit, offset } });
     if (data.total_count != null) total = data.total_count;
     all = all.concat(data.issues || []);
     if ((data.issues || []).length === 0) break;
     offset += limit;
   }
-  return all;
+  const totalCount = Number.isFinite(total) ? total : all.length;
+  return { issues: all, totalCount, truncated: totalCount > all.length };
 }
 
-module.exports = { fetchAllPages, mapLimit, fetchAllIssues };
+async function fetchAllIssues(redmine, params) {
+  const { issues } = await fetchAllIssuesMeta(redmine, params);
+  return issues;
+}
+
+module.exports = { fetchAllPages, mapLimit, fetchAllIssues, fetchAllIssuesMeta, MAX_ISSUES };
