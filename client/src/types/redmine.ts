@@ -58,6 +58,21 @@ export interface IssueRelation {
   relation_type: string;
 }
 
+// Frente calculada pelo servidor (regras do usuário em /frentes). `null` = nenhuma
+// regra casou; ausente = a rota não classifica (listas de outras telas).
+export interface IssueFrente {
+  id: string;
+  name: string;
+  color: string;
+  /** Frente oculta por padrão no quadro (ex.: pedidos à infra). */
+  hidden: boolean;
+  /** Quem decidiu: você (manual), uma regra, ou a frente-padrão. */
+  src: 'manual' | 'regra' | 'padrao';
+  ruleId?: string;
+  /** Só no detalhe: regras de OUTRAS frentes que também casariam (perderam na ordem). */
+  also?: string[];
+}
+
 export interface Issue {
   id: number;
   subject: string;
@@ -85,6 +100,7 @@ export interface Issue {
   relations?: IssueRelation[];
   watchers?: NamedRef[];
   attachments?: Attachment[];
+  frente?: IssueFrente | null;
 }
 
 export interface Mention {

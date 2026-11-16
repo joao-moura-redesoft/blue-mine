@@ -120,6 +120,7 @@ function buildApp() {
   app.use('/api', require('./routes/events'));
   app.use('/api', require('./routes/sprints'));
   app.use('/api', require('./routes/boards'));
+  app.use('/api', require('./routes/frentes'));
   app.use('/api', require('./routes/mail'));
   app.use('/api', require('./routes/wiki'));
   app.use('/api', require('./routes/jitsi'));

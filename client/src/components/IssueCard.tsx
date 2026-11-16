@@ -19,6 +19,7 @@ import {
   Square,
   Loader2,
   Video,
+  Eye,
 } from 'lucide-react';
 import { IssueAIPanel } from './IssueAIPanel';
 import { formatDistanceToNow } from 'date-fns';
@@ -30,6 +31,7 @@ import { useJitsiPresence } from '../hooks/useJitsiPresence';
 import { useJitsi } from './jitsi/JitsiContext';
 import { makeTaskRoom } from '../utils/jitsiConfig';
 import { PersonAvatar } from './PersonAvatar';
+import { FrenteChip } from './frentes/FrenteChip';
 
 const PRIORITY_COLORS: Record<string, string> = {
   Baixa: 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300',
@@ -433,12 +435,34 @@ interface Props {
   focused?: boolean;
   navigable?: boolean;
   compact?: boolean;
+  /** Mostra o chip da frente. O quadro desliga quando já agrupa por frente. */
+  showFrente?: boolean;
   onSubtaskOpen?: (id: number) => void;
   onSubtaskDone?: (id: number, statusId: number) => void;
   activeTimerIssueId?: number | null;
   timerFormatted?: string;
   onTimerStart?: (id: number) => void;
   onTimerStop?: () => void;
+  /** Tarefa acompanhada (ligada a mim, está com outra pessoa): não arrasta. */
+  followed?: boolean;
+  /** Por que está sendo acompanhada ("Sou DEV", "Criada por mim"…). */
+  followLabel?: string;
+}
+
+/** Selo "com Fulana" do card acompanhado: de quem é a vez agora. */
+function FollowedBadge({ issue, label }: { issue: Issue; label: string }) {
+  const who = issue.assigned_to?.name;
+  return (
+    <div
+      className="flex items-center gap-1.5 mb-2 text-[11px] font-medium text-violet-700 dark:text-violet-300"
+      title={`${label}, mas a tarefa está com outra pessoa. Não pode ser arrastada daqui.`}
+    >
+      <Eye size={12} className="flex-shrink-0" />
+      <span className="truncate">
+        {who ? `${label} · com ${who}` : `${label} · sem responsável`}
+      </span>
+    </div>
+  );
 }
 
 function IssueCardImpl({
@@ -454,16 +478,22 @@ function IssueCardImpl({
   focused,
   navigable = true,
   compact = false,
+  showFrente = true,
   onSubtaskOpen,
   onSubtaskDone,
   activeTimerIssueId,
   timerFormatted,
   onTimerStart,
   onTimerStop,
+  followed = false,
+  followLabel = 'Acompanhando',
 }: Props) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `issue-${issue.id}`,
     data: { issue },
+    // A tarefa está com outra pessoa: mudar o status dela arrastando seria fácil
+    // demais de fazer sem querer. Quem precisar mexer abre o modal.
+    disabled: followed,
   });
 
   const prefetchIssue = usePrefetchIssue();
@@ -546,6 +576,7 @@ function IssueCardImpl({
         className={`
           relative flex items-center gap-2 bg-white dark:bg-slate-800 rounded border px-2 py-1 cursor-pointer select-none
           transition-all duration-150
+          ${followed ? 'border-dashed opacity-80' : ''}
           ${focused ? 'border-blue-500 ring-2 ring-blue-500 ring-offset-1' : selected ? 'border-blue-400 ring-1 ring-blue-300' : 'border-slate-200 dark:border-slate-700'}
           ${isDragging ? 'opacity-40 scale-95' : 'hover:border-blue-300 dark:hover:border-blue-600 hover:shadow-sm'}
         `}
@@ -553,12 +584,27 @@ function IssueCardImpl({
         <span
           className={`w-2 h-2 rounded-full flex-shrink-0 ${PRIORITY_DOTS[issue.priority.name] ?? 'bg-slate-400'}`}
         />
+        {followed && (
+          <span
+            title={`${followLabel} · com ${issue.assigned_to?.name ?? 'ninguém'}`}
+            className="flex-shrink-0 text-violet-500"
+          >
+            <Eye size={11} />
+          </span>
+        )}
         <span className="text-xs text-slate-400 dark:text-slate-500 flex-shrink-0">
           #{issue.id}
         </span>
         <span className="text-xs font-medium text-slate-800 dark:text-slate-100 truncate">
           {issue.subject}
         </span>
+        {showFrente && issue.frente && (
+          <span
+            title={`Frente: ${issue.frente.name}`}
+            className="w-2 h-2 rounded-full flex-shrink-0"
+            style={{ backgroundColor: issue.frente.color }}
+          />
+        )}
         <LiveBadge issue={issue} compact />
         {isTimerRunning && (
           <span className="flex items-center gap-0.5 text-[10px] font-mono text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/30 px-1.5 py-0.5 rounded flex-shrink-0 animate-pulse">
@@ -587,6 +633,7 @@ function IssueCardImpl({
       className={`
         relative bg-white dark:bg-slate-800 rounded-lg border p-3 cursor-pointer select-none group
         transition-all duration-200
+        ${followed ? 'border-dashed opacity-85' : ''}
         ${focused ? 'border-blue-500 ring-2 ring-blue-500 ring-offset-1' : selected ? 'border-blue-500 ring-2 ring-blue-300' : 'border-slate-200 dark:border-slate-700'}
         ${isDragging && !isDragOverlay ? 'opacity-40 scale-95' : ''}
         ${isDragOverlay ? 'shadow-2xl rotate-1 border-blue-300 scale-105' : 'shadow-sm hover:shadow-lg hover:border-blue-300 dark:hover:border-blue-600 hover:-translate-y-0.5 active:scale-[0.99]'}
@@ -618,6 +665,8 @@ function IssueCardImpl({
           <span className="font-normal opacity-70">em andamento</span>
         </div>
       )}
+
+      {followed && !isDragOverlay && <FollowedBadge issue={issue} label={followLabel} />}
 
       {/* Badge AO VIVO — sala de vídeo ativa nesta tarefa */}
       {!isDragOverlay && <LiveBadge issue={issue} />}
@@ -652,10 +701,19 @@ function IssueCardImpl({
         {issue.subject}
       </p>
 
-      {/* Projeto */}
-      <p className="text-xs text-slate-400 dark:text-slate-500 mb-2 truncate">
-        {issue.project.name}
-      </p>
+      {/* Frente + Projeto */}
+      <div className="flex items-center gap-1.5 mb-2 min-w-0">
+        {showFrente && issue.frente && (
+          <FrenteChip
+            frente={issue.frente}
+            manual={issue.frente.src === 'manual'}
+            className="flex-shrink-0"
+          />
+        )}
+        <p className="text-xs text-slate-400 dark:text-slate-500 truncate min-w-0">
+          {issue.project.name}
+        </p>
+      </div>
 
       {/* Footer: prazo estilo Trello + progresso + atualizado */}
       <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-700">

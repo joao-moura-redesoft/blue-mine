@@ -266,19 +266,29 @@ export function useCreateIssue() {
   });
 }
 
-export function useMonitoredIssues() {
+// `projectId` recorta no Redmine (com subprojetos) — usado pelas colunas
+// acompanhadas do board. Sem projeto a chave é a mesma das outras telas e o
+// cache é compartilhado: nenhuma busca a mais. `enabled` deixa o board pedir só
+// as fontes que o usuário ligou.
+const scopedKey = (key: string, projectId?: number) => (projectId ? [key, projectId] : [key]);
+
+export function useMonitoredIssues(projectId?: number, enabled = true) {
   return useQuery({
-    queryKey: ['issues-monitored'],
-    queryFn: redmineApi.getMonitoredIssues,
+    queryKey: scopedKey('issues-monitored', projectId),
+    // Função anônima: passar a referência direto faria o react-query entregar o
+    // contexto da query como `projectId`.
+    queryFn: () => redmineApi.getMonitoredIssues(projectId),
+    enabled,
     refetchInterval: useIssueRefetchInterval(90 * 1000),
     refetchIntervalInBackground: true,
   });
 }
 
-export function useAuthoredIssues() {
+export function useAuthoredIssues(projectId?: number, enabled = true) {
   return useQuery({
-    queryKey: ['issues-authored'],
-    queryFn: redmineApi.getAuthoredIssues,
+    queryKey: scopedKey('issues-authored', projectId),
+    queryFn: () => redmineApi.getAuthoredIssues(projectId),
+    enabled,
     refetchInterval: useIssueRefetchInterval(90 * 1000),
   });
 }
@@ -286,11 +296,12 @@ export function useAuthoredIssues() {
 // "Observadas" agora vem da lista local (localStorage), não da API de watchers do
 // Redmine. Busca os detalhes das tarefas marcadas pelo ID. A queryKey inclui os IDs,
 // então marcar/desmarcar refaz a busca automaticamente.
-export function useWatchedIssues() {
+export function useWatchedIssues(projectId?: number, enabled = true) {
   const ids = useLocalWatches();
   return useQuery({
-    queryKey: ['issues-watched-local', ids],
-    queryFn: () => redmineApi.getIssuesByIds(ids),
+    queryKey: projectId ? ['issues-watched-local', ids, projectId] : ['issues-watched-local', ids],
+    queryFn: () => redmineApi.getIssuesByIds(ids, projectId),
+    enabled,
     refetchInterval: useIssueRefetchInterval(90 * 1000),
     refetchIntervalInBackground: true,
   });

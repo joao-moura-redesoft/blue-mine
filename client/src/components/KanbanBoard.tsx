@@ -33,6 +33,8 @@ import {
   Layers,
   Gauge,
   FolderKanban,
+  Tags,
+  Settings2,
 } from 'lucide-react';
 import {
   SortableContext,
@@ -49,7 +51,11 @@ import {
   useVersionIssues,
   usePriorities,
   useIssuesMeta,
+  useMonitoredIssues,
+  useAuthoredIssues,
+  useWatchedIssues,
 } from '../hooks/useRedmine';
+import { useFrentes, useSetManualFrente } from '../hooks/useFrentes';
 import { useTimer } from '../hooks/useTimer';
 import type { Version } from '../types/redmine';
 import { SavedFiltersBar } from './SavedFiltersBar';
@@ -61,10 +67,23 @@ import { KanbanBoardSkeleton, SkeletonBox } from './Skeletons';
 
 import { loadArchived, saveArchived } from '../utils/archive';
 import { errorList } from '../utils/httpError';
+import { makeIsClosedIssue } from '../utils/closedIssue';
+import {
+  loadFollowConfig,
+  saveFollowConfig,
+  collectFollowed,
+  hasFollowSetup,
+  FOLLOW_SOURCES,
+  type FollowConfig,
+  type FollowSource,
+} from '../utils/followedColumns';
 
 // Lazy: enquanto este import era estático, o módulo voltava para o chunk
 // principal e anulava o lazy() do App.tsx — o Vite avisa no build com
 // "dynamic import will not move module into another chunk".
+const FrenteTriageModal = lazy(() =>
+  import('./frentes/FrenteTriageModal').then((m) => ({ default: m.FrenteTriageModal })),
+);
 const CreateIssueModal = lazy(() =>
   import('./CreateIssueModal').then((m) => ({ default: m.CreateIssueModal })),
 );
@@ -72,15 +91,20 @@ const CreateIssueModal = lazy(() =>
 type SortBy = 'priority' | 'due_date' | 'updated';
 // O board só carrega tarefas com assigned_to_id=me, então agrupar por responsável
 // rendia sempre uma raia só. Projeto é o corte que realmente separa as tarefas.
-type GroupBy = 'none' | 'project' | 'priority';
+// 'frente' separa pelo que a tarefa é (CRM, Consync…), calculado pelas regras do
+// usuário — projeto do Redmine não distingue isso (ver lib/frentes.js).
+type GroupBy = 'none' | 'frente' | 'project' | 'priority';
 
 const GROUP_LABELS: Record<GroupBy, string> = {
   none: 'Não agrupar',
+  frente: 'Frente',
   project: 'Projeto',
   priority: 'Prioridade',
 };
 
 const NO_PROJECT = 'Sem projeto';
+// Chave da raia/filtro das tarefas que nenhuma regra classificou.
+const NO_FRENTE = '__sem-frente';
 
 const PRIORITY_ORDER: Record<string, number> = {
   Imediata: 0,
@@ -332,6 +356,7 @@ interface ColumnProps {
   onUnpin?: () => void;
   focusedIssueId?: number;
   compactMode?: boolean;
+  showFrente?: boolean;
   onSubtaskOpen?: (id: number) => void;
   onSubtaskDone?: (id: number, statusId: number) => void;
   activeTimerIssueId?: number | null;
@@ -344,6 +369,10 @@ interface ColumnProps {
   onWipChange?: (statusId: number, limit: number | null) => void;
   dndId?: string;
   draggableColumn?: boolean;
+  /** Tarefas ligadas a mim mas com outra pessoa — só leitura, sem arraste. */
+  followedIssues?: Issue[];
+  /** Por que cada acompanhada está ali (vira o selo do card). */
+  followReasons?: Map<number, FollowSource>;
 }
 
 const CUSTOM_COLORS: Record<
@@ -429,6 +458,13 @@ const CUSTOM_COLORS: Record<
   },
 };
 
+// Default estável: um `[]` novo a cada render anularia o memo dos cards.
+const NO_ISSUES: Issue[] = [];
+const BADGE_OF = Object.fromEntries(FOLLOW_SOURCES.map((f) => [f.id, f.badge])) as Record<
+  FollowSource,
+  string
+>;
+
 const COL_COLORS: Record<string, string> = {
   'Em andamento': 'border-t-blue-500',
   Fechado: 'border-t-slate-300',
@@ -458,6 +494,7 @@ function KanbanColumn({
   onUnpin,
   focusedIssueId,
   compactMode,
+  showFrente,
   onSubtaskOpen,
   onSubtaskDone,
   activeTimerIssueId,
@@ -470,6 +507,8 @@ function KanbanColumn({
   onWipChange,
   dndId,
   draggableColumn = true,
+  followedIssues = NO_ISSUES,
+  followReasons,
 }: ColumnProps) {
   const { isOver, setNodeRef, attributes, listeners, transform, transition, isDragging } =
     useSortable({
@@ -622,6 +661,16 @@ function KanbanColumn({
                 )}
             </div>
 
+            {followedIssues.length > 0 && (
+              <span
+                title={`${followedIssues.length} acompanhada${followedIssues.length !== 1 ? 's' : ''} (ligada${followedIssues.length !== 1 ? 's' : ''} a você, com outra pessoa)`}
+                className="flex items-center gap-0.5 text-[11px] font-medium text-violet-500 flex-shrink-0"
+              >
+                <Eye size={11} />
+                {followedIssues.length}
+              </span>
+            )}
+
             {overWip && (
               <span
                 className="flex items-center gap-1 text-[10px] font-bold text-red-600 flex-shrink-0"
@@ -708,12 +757,13 @@ function KanbanColumn({
             </button>
           </div>
         </div>
-        {collapsed && issues.length > 0 && (
+        {collapsed && issues.length + followedIssues.length > 0 && (
           <button
             onClick={() => setCollapsed(false)}
             className="mt-2 w-full text-xs text-slate-400 hover:text-blue-600 transition-colors text-left"
           >
-            Ver {issues.length} tarefa{issues.length !== 1 ? 's' : ''} →
+            Ver {issues.length + followedIssues.length} tarefa
+            {issues.length + followedIssues.length !== 1 ? 's' : ''} →
           </button>
         )}
       </div>
@@ -742,6 +792,7 @@ function KanbanColumn({
               onToggleSelect={onToggleSelect}
               focused={focusedIssueId === issue.id}
               compact={compactMode}
+              showFrente={showFrente}
               onSubtaskOpen={onSubtaskOpen}
               onSubtaskDone={onSubtaskDone}
               activeTimerIssueId={activeTimerIssueId}
@@ -753,7 +804,32 @@ function KanbanColumn({
               onTimerStop={onTimerStop}
             />
           ))}
-          {issues.length === 0 && (
+          {followedIssues.length > 0 && (
+            <>
+              <div
+                className={`flex items-center gap-1.5 px-1 text-[11px] font-medium text-violet-500 ${issues.length > 0 ? 'pt-1' : ''}`}
+              >
+                <Eye size={11} />
+                Acompanhando ({followedIssues.length})
+                <span className="flex-1 border-t border-dashed border-violet-200 dark:border-violet-800" />
+              </div>
+              {followedIssues.map((issue) => (
+                <IssueCard
+                  key={issue.id}
+                  issue={issue}
+                  onClick={onIssueClick}
+                  statuses={statuses}
+                  focused={focusedIssueId === issue.id}
+                  compact={compactMode}
+                  showFrente={showFrente}
+                  onSubtaskOpen={onSubtaskOpen}
+                  followed
+                  followLabel={BADGE_OF[followReasons?.get(issue.id) ?? 'dev']}
+                />
+              ))}
+            </>
+          )}
+          {issues.length === 0 && followedIssues.length === 0 && (
             <div
               className={`flex items-center justify-center h-20 rounded-lg border-2 border-dashed transition-colors ${isOver && !customTheme ? 'border-blue-300 bg-blue-50/50' : !isOver && !customTheme ? 'border-slate-200' : ''} ${customTheme ? 'col-empty-state' : ''}`}
             >
@@ -780,7 +856,12 @@ function KanbanColumn({
                   {archivedIssues.map((issue) => (
                     <div key={issue.id} className="relative group/arch">
                       <div className="opacity-50 pointer-events-none">
-                        <IssueCard issue={issue} onClick={() => {}} navigable={false} />
+                        <IssueCard
+                          issue={issue}
+                          onClick={() => {}}
+                          navigable={false}
+                          showFrente={showFrente}
+                        />
                       </div>
                       {/* Overlay com ações sobre a área archivada */}
                       <div className="absolute inset-0 flex items-center justify-center gap-2 opacity-0 group-hover/arch:opacity-100 transition-opacity bg-white/70 dark:bg-slate-900/80 rounded-lg">
@@ -837,6 +918,8 @@ export function KanbanBoard({
   const { data: priorities } = usePriorities();
   const { data: issues, isLoading, refetch, isFetching } = useIssues(projectId);
   const issuesMeta = useIssuesMeta();
+  const { data: frentesCfg } = useFrentes();
+  const setManualFrente = useSetManualFrente();
   const updateStatus = useUpdateIssueStatus();
   const timer = useTimer();
 
@@ -866,6 +949,15 @@ export function KanbanBoard({
     return new Set();
   });
   const [archivedIds, setArchivedIds] = useState<Set<number>>(loadArchived);
+  // Colunas acompanhadas: tarefas em que sou DEV e estão com outra pessoa.
+  const [followCfg, setFollowCfg] = useState<FollowConfig>(loadFollowConfig);
+  // Fontes das acompanhadas. Sem projeto, as chaves são as mesmas do resto do app
+  // (cache compartilhado, nenhuma busca a mais); com projeto, o servidor recorta
+  // no Redmine — que inclui os subprojetos. Só busca o que estiver ligado.
+  const followOn = !followCfg.hidden && hasFollowSetup(followCfg);
+  const { data: monitored } = useMonitoredIssues(projectId, followCfg.sources.dev);
+  const { data: authored } = useAuthoredIssues(projectId, followOn && followCfg.sources.authored);
+  const { data: watched } = useWatchedIssues(projectId, followOn && followCfg.sources.watched);
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortBy>('priority');
@@ -891,9 +983,24 @@ export function KanbanBoard({
     return {};
   });
   const [groupBy, setGroupBy] = useState<GroupBy>(() => {
-    // Valores antigos (ex.: 'assignee', removido) caem em 'none'.
+    // Valores antigos (ex.: 'assignee', removido) caem em 'none'. Quem nunca
+    // escolheu nada começa por frente: é o recorte que separa as tarefas.
     const saved = localStorage.getItem('kanban-group-by');
-    return saved === 'project' || saved === 'priority' ? saved : 'none';
+    if (saved === 'frente' || saved === 'project' || saved === 'priority') return saved;
+    return saved === null ? 'frente' : 'none';
+  });
+  // Frentes filtradas (vazio = todas as visíveis). NO_FRENTE filtra as sem frente.
+  const [frenteFilter, setFrenteFilter] = useState<Set<string>>(new Set());
+  const [showTriage, setShowTriage] = useState(false);
+  // Raias recolhidas, por agrupamento ("frente:consync"): com várias frentes a página
+  // fica comprida, e quem foca numa delas recolhe as outras.
+  const [collapsedLanes, setCollapsedLanes] = useState<Set<string>>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem('kanban-collapsed-lanes') ?? '[]');
+      return new Set(Array.isArray(raw) ? raw.filter((k) => typeof k === 'string') : []);
+    } catch {
+      return new Set();
+    }
   });
   const [groupOpen, setGroupOpen] = useState(false);
   const [priorityFilter, setPriorityFilter] = useState('');
@@ -1011,6 +1118,27 @@ export function KanbanBoard({
     });
   }, []);
 
+  const updateFollow = useCallback((fn: (prev: FollowConfig) => FollowConfig) => {
+    setFollowCfg((prev) => {
+      const next = fn(prev);
+      saveFollowConfig(next);
+      return next;
+    });
+  }, []);
+
+  const toggleFollowedStatus = useCallback(
+    (id: number) =>
+      updateFollow((prev) => ({
+        ...prev,
+        // Escolher um status é querer ver: religa se estava escondido.
+        hidden: false,
+        statusIds: prev.statusIds.includes(id)
+          ? prev.statusIds.filter((s) => s !== id)
+          : [...prev.statusIds, id],
+      })),
+    [updateFollow],
+  );
+
   const togglePinnedStatus = useCallback((id: number) => {
     setPinnedStatuses((prev) => {
       const n = new Set(prev);
@@ -1061,6 +1189,7 @@ export function KanbanBoard({
   // Atalhos de teclado
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (showTriage) return; // a fila de classificação tem os próprios atalhos
       const tag = (e.target as HTMLElement).tagName;
       const isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
       if (e.key === 'n' && !isTyping && !showCreate) {
@@ -1073,60 +1202,115 @@ export function KanbanBoard({
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [showCreate]);
+  }, [showCreate, showTriage]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
   const today = new Date().toISOString().split('T')[0];
 
-  // Aplica busca textual + filtro rápido de alertas + filtro de prioridade
-  const filteredIssues = useMemo(() => {
-    if (!issues) return [];
-    let list = issues;
+  // Regra única de "esta tarefa aparece?" quanto à frente: filtrando, só as
+  // escolhidas; sem filtro, tudo menos as frentes ocultas (ex.: pedidos à infra),
+  // a não ser que haja busca — quem busca por número/título quer achar mesmo assim.
+  const frenteVisible = useCallback(
+    (i: Issue) =>
+      frenteFilter.size > 0
+        ? frenteFilter.has(i.frente?.id ?? NO_FRENTE)
+        : !!search.trim() || !i.frente?.hidden,
+    [frenteFilter, search],
+  );
 
-    if (search.trim()) {
-      // "#123" é como as tarefas aparecem em todo lugar — aceitar com e sem "#".
-      const q = search.trim().toLowerCase().replace(/^#/, '');
-      list = list.filter(
-        (i) =>
-          i.subject.toLowerCase().includes(q) ||
-          String(i.id).includes(q) ||
-          i.project.name.toLowerCase().includes(q),
-      );
-    }
+  // Aplica busca textual + filtro rápido de alertas + filtro de prioridade.
+  // Vale para as minhas tarefas e para as acompanhadas.
+  const applyBoardFilters = useCallback(
+    (source: Issue[]) => {
+      let list = source;
 
-    if (priorityFilter) {
-      list = list.filter((i) => i.priority.name === priorityFilter);
-    }
+      if (search.trim()) {
+        // "#123" é como as tarefas aparecem em todo lugar — aceitar com e sem "#".
+        const q = search.trim().toLowerCase().replace(/^#/, '');
+        list = list.filter(
+          (i) =>
+            i.subject.toLowerCase().includes(q) ||
+            String(i.id).includes(q) ||
+            i.project.name.toLowerCase().includes(q),
+        );
+      }
 
-    if (selectedVersionId) {
-      list = list.filter((i) => i.fixed_version?.id === selectedVersionId);
-    }
+      if (priorityFilter) {
+        list = list.filter((i) => i.priority.name === priorityFilter);
+      }
 
-    if (activeFilter === 'overdue') {
-      list = list.filter(
-        (i) =>
-          i.due_date &&
-          i.due_date < today &&
-          !i.status.name.toLowerCase().includes('fechad') &&
-          !i.status.name.toLowerCase().includes('cancelad'),
-      );
-    } else if (activeFilter === 'reviewToday') {
-      list = list.filter((i) => getReviewAlert(i) === 'today');
-    } else if (activeFilter === 'reviewOverdue') {
-      list = list.filter((i) => getReviewAlert(i) === 'overdue');
-    } else if (activeFilter === 'missing') {
-      list = list.filter((i) => getMissingFields(i).length > 0);
-    }
+      if (selectedVersionId) {
+        list = list.filter((i) => i.fixed_version?.id === selectedVersionId);
+      }
 
-    return list;
-  }, [issues, search, activeFilter, priorityFilter, selectedVersionId, today]);
+      list = list.filter(frenteVisible);
+
+      if (activeFilter === 'overdue') {
+        list = list.filter(
+          (i) =>
+            i.due_date &&
+            i.due_date < today &&
+            !i.status.name.toLowerCase().includes('fechad') &&
+            !i.status.name.toLowerCase().includes('cancelad'),
+        );
+      } else if (activeFilter === 'reviewToday') {
+        list = list.filter((i) => getReviewAlert(i) === 'today');
+      } else if (activeFilter === 'reviewOverdue') {
+        list = list.filter((i) => getReviewAlert(i) === 'overdue');
+      } else if (activeFilter === 'missing') {
+        list = list.filter((i) => getMissingFields(i).length > 0);
+      }
+
+      return list;
+    },
+    [search, activeFilter, priorityFilter, selectedVersionId, frenteVisible, today],
+  );
+
+  const filteredIssues = useMemo(
+    () => (issues ? applyBoardFilters(issues) : []),
+    [issues, applyBoardFilters],
+  );
+
+  // Acompanhadas que passam pelos filtros da tela. Os filtros de alerta (Atrasadas,
+  // Revisão hoje…) contam só as minhas no StatsBar, então ali elas saem: o número
+  // do botão tem que bater com os cards. Arquivar localmente também vale para elas
+  // (a tarefa pode ter sido arquivada quando ainda era minha).
+  const isClosedIssue = useMemo(() => makeIsClosedIssue(allStatuses), [allStatuses]);
+  const myIssueIds = useMemo(() => new Set((issues ?? []).map((i) => i.id)), [issues]);
+  const followLists = useMemo(
+    () => ({ dev: monitored, authored, watched }),
+    [monitored, authored, watched],
+  );
+  // Candidatas com a escolha de status aplicada (antes dos filtros da tela).
+  const followSelection = useMemo(
+    () => collectFollowed(followLists, followCfg, myIssueIds, isClosedIssue),
+    [followLists, followCfg, myIssueIds, isClosedIssue],
+  );
+  const followedIssues = useMemo(() => {
+    if (activeFilter || followCfg.hidden) return [];
+    return applyBoardFilters(followSelection.issues).filter((i) => !archivedIds.has(i.id));
+  }, [followSelection, followCfg.hidden, activeFilter, applyBoardFilters, archivedIds]);
+  const followReasons = followSelection.reasons;
+
+  // Quantas a configuração traria se estivesse ligada — é o número do botão da
+  // barra, que precisa dizer o que vai aparecer ao religar. (Escondidas, só a
+  // fonte DEV continua carregada; as outras contam ao religar.)
+  const followedAvailable = followSelection.issues.length;
+
+  // Base dos alertas e dos botões "Mostrar fechadas": as mesmas tarefas que o
+  // quadro pode mostrar (sem as de frentes ocultas), senão o número promete
+  // cartões que não aparecem.
+  const statsIssues = useMemo(() => (issues ?? []).filter(frenteVisible), [issues, frenteVisible]);
 
   const visibleStatuses = useMemo(() => {
     if (!allStatuses || !filteredIssues) return [];
     const usedIds = new Set(filteredIssues.map((i) => i.status.id));
     const baseIds =
       activeFilter || search ? new Set(issues?.map((i) => i.status.id) ?? []) : usedIds;
+    // Coluna acompanhada aparece como uma fixada (mesmo vazia), salvo escondidas.
+    followedIssues.forEach((i) => baseIds.add(i.status.id));
+    if (!followCfg.hidden) followCfg.statusIds.forEach((id) => baseIds.add(id));
 
     const visible = allStatuses.filter(
       (s) =>
@@ -1155,6 +1339,8 @@ export function KanbanBoard({
     activeFilter,
     search,
     columnOrder,
+    followedIssues,
+    followCfg,
   ]);
 
   // Prioridades reais do Redmine (a lista era fixa e escondia prioridades
@@ -1171,13 +1357,15 @@ export function KanbanBoard({
     (search.trim() ? 1 : 0) +
     (priorityFilter ? 1 : 0) +
     (activeFilter ? 1 : 0) +
-    (selectedVersionId ? 1 : 0);
+    (selectedVersionId ? 1 : 0) +
+    (frenteFilter.size > 0 ? 1 : 0);
 
   const clearFilters = useCallback(() => {
     setSearch('');
     setPriorityFilter('');
     setActiveFilter(null);
     setSelectedVersionId(undefined);
+    setFrenteFilter(new Set());
   }, []);
 
   // Colunas fechadas que existem nas tarefas carregadas — viram botões de
@@ -1185,11 +1373,11 @@ export function KanbanBoard({
   const closedStatusOptions = useMemo(() => {
     if (!allStatuses || !issues) return [];
     const counts = new Map<number, number>();
-    issues.forEach((i) => counts.set(i.status.id, (counts.get(i.status.id) ?? 0) + 1));
+    statsIssues.forEach((i) => counts.set(i.status.id, (counts.get(i.status.id) ?? 0) + 1));
     return allStatuses
       .filter((s) => s.is_closed && counts.has(s.id))
       .map((s) => ({ id: s.id, name: s.name, count: counts.get(s.id) ?? 0 }));
-  }, [allStatuses, issues]);
+  }, [allStatuses, issues, statsIssues]);
 
   const issuesByStatus = useMemo(() => {
     const map = new Map<number, Issue[]>();
@@ -1204,6 +1392,29 @@ export function KanbanBoard({
     return map;
   }, [filteredIssues, visibleStatuses, sortBy, archivedIds]);
 
+  // Contagem do menu Colunas: todas as candidatas das fontes ligadas, por status,
+  // sem a escolha de status — mostra onde há o que acompanhar antes de ligar.
+  const followCandidates = useMemo(
+    () => collectFollowed(followLists, followCfg, myIssueIds, isClosedIssue, false).issues,
+    [followLists, followCfg, myIssueIds, isClosedIssue],
+  );
+  const followCountByStatus = useMemo(() => {
+    const map = new Map<number, number>();
+    followCandidates.forEach((i) => map.set(i.status.id, (map.get(i.status.id) ?? 0) + 1));
+    return map;
+  }, [followCandidates]);
+
+  const followedByStatus = useMemo(() => {
+    const map = new Map<number, Issue[]>();
+    followedIssues.forEach((i) => {
+      const list = map.get(i.status.id);
+      if (list) list.push(i);
+      else map.set(i.status.id, [i]);
+    });
+    map.forEach((list, key) => map.set(key, sortIssues(list, sortBy)));
+    return map;
+  }, [followedIssues, sortBy]);
+
   // Quantos cards estão de fato no board: fora as arquivadas e as que caem em
   // colunas não visíveis (fechadas/canceladas). O contador do cabeçalho mostrava
   // o total filtrado, que incluía tarefas que ninguém via na tela.
@@ -1217,6 +1428,7 @@ export function KanbanBoard({
   // as mesmas colunas de status dentro de cada raia. null = visão normal.
   const laneKeyOf = useCallback(
     (i: Issue) => {
+      if (groupBy === 'frente') return i.frente?.id ?? NO_FRENTE;
       if (groupBy === 'project') return i.project?.name ?? NO_PROJECT;
       if (groupBy === 'priority') return i.priority.name;
       return '';
@@ -1227,11 +1439,27 @@ export function KanbanBoard({
   const lanes = useMemo(() => {
     if (groupBy === 'none') return null;
     const active = filteredIssues.filter((i) => !archivedIds.has(i.id));
-    const keys = Array.from(new Set(active.map(laneKeyOf)));
+    // Arquivadas passam pelos mesmos filtros e ficam no rodapé das colunas da
+    // raia a que pertencem, com "Restaurar". Uma raia só com arquivadas existe
+    // (contagem 0), senão elas ficariam sem como voltar.
+    const archived = filteredIssues.filter((i) => archivedIds.has(i.id));
+    const keys = Array.from(new Set([...active, ...archived, ...followedIssues].map(laneKeyOf)));
     if (groupBy === 'priority') {
       keys.sort((a, b) => (PRIORITY_ORDER[a] ?? 5) - (PRIORITY_ORDER[b] ?? 5));
+    } else if (groupBy === 'frente') {
+      // Ordem das frentes na configuração; as sem frente por último.
+      const order = new Map((frentesCfg?.frentes ?? []).map((f, n) => [f.id, n]));
+      const rank = (k: string) => (k === NO_FRENTE ? 1e6 : (order.get(k) ?? 1e5));
+      keys.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
     } else {
       keys.sort((a, b) => (a === NO_PROJECT ? 1 : b === NO_PROJECT ? -1 : a.localeCompare(b)));
+    }
+    // Nome e cor das raias de frente vêm das próprias tarefas (já anotadas).
+    const frenteMeta = new Map<string, { name: string; color: string }>();
+    if (groupBy === 'frente') {
+      [...active, ...archived, ...followedIssues].forEach(
+        (i) => i.frente && frenteMeta.set(i.frente.id, i.frente),
+      );
     }
     return keys.map((key) => {
       const byStatus = new Map<number, Issue[]>();
@@ -1244,22 +1472,97 @@ export function KanbanBoard({
         if (byStatus.has(sid)) byStatus.get(sid)!.push(i);
       });
       byStatus.forEach((list, k) => byStatus.set(k, sortIssues(list, sortBy)));
-      return { key, label: key, byStatus, count };
+      const archivedByStatus = new Map<number, Issue[]>();
+      visibleStatuses.forEach((s) => archivedByStatus.set(s.id, []));
+      archived.forEach((i) => {
+        if (laneKeyOf(i) !== key) return;
+        if (archivedByStatus.has(i.status.id)) archivedByStatus.get(i.status.id)!.push(i);
+      });
+      const followedByStatus = new Map<number, Issue[]>();
+      followedIssues.forEach((i) => {
+        if (laneKeyOf(i) !== key) return;
+        const list = followedByStatus.get(i.status.id);
+        if (list) list.push(i);
+        else followedByStatus.set(i.status.id, [i]);
+      });
+      followedByStatus.forEach((list, k) => followedByStatus.set(k, sortIssues(list, sortBy)));
+      const meta = frenteMeta.get(key);
+      const label =
+        groupBy === 'frente' ? (key === NO_FRENTE ? 'Sem frente' : (meta?.name ?? key)) : key;
+      return {
+        key,
+        label,
+        color: meta?.color,
+        byStatus,
+        archivedByStatus,
+        followedByStatus,
+        count,
+      };
     });
-  }, [groupBy, filteredIssues, archivedIds, visibleStatuses, sortBy, laneKeyOf]);
+  }, [
+    groupBy,
+    filteredIssues,
+    followedIssues,
+    archivedIds,
+    visibleStatuses,
+    sortBy,
+    laneKeyOf,
+    frentesCfg,
+  ]);
 
-  // Issues arquivadas agrupadas por status (para mostrar no rodapé de cada coluna)
+  // Contagem de tarefas ABERTAS por frente (todas as listas carregadas, antes de
+  // qualquer filtro) para os chips e para o aviso de "sem frente".
+  const frenteStats = useMemo(() => {
+    const counts = new Map<string, number>();
+    let none = 0;
+    (issues ?? []).forEach((i) => {
+      if (isClosedIssue(i) || archivedIds.has(i.id)) return;
+      if (!i.frente) none++;
+      else counts.set(i.frente.id, (counts.get(i.frente.id) ?? 0) + 1);
+    });
+    return { counts, none };
+  }, [issues, archivedIds, isClosedIssue]);
+
+  const toggleLane = useCallback((key: string) => {
+    setCollapsedLanes((prev) => {
+      const n = new Set(prev);
+      n.has(key) ? n.delete(key) : n.add(key);
+      try {
+        localStorage.setItem('kanban-collapsed-lanes', JSON.stringify([...n]));
+      } catch {
+        /* sem storage: só não lembra para a próxima */
+      }
+      return n;
+    });
+  }, []);
+  const isLaneCollapsed = (key: string) => collapsedLanes.has(`${groupBy}:${key}`);
+
+  const openFrenteSettings = () =>
+    window.dispatchEvent(new CustomEvent('bluemine:open-settings', { detail: { tab: 'frentes' } }));
+
+  const toggleFrenteFilter = useCallback((id: string) => {
+    setFrenteFilter((prev) => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  }, []);
+
+  // Issues arquivadas agrupadas por status (para mostrar no rodapé de cada coluna).
+  // Parte de filteredIssues, como as colunas: arquivar tira a tarefa do fluxo, não
+  // dos filtros — antes o rodapé saía de `issues` e mostrava arquivadas de outra
+  // frente (ou de frente oculta) por cima de busca, prioridade, versão e alertas.
   const archivedByStatus = useMemo(() => {
     const map = new Map<number, Issue[]>();
     visibleStatuses.forEach((s) => map.set(s.id, []));
-    (issues ?? [])
+    filteredIssues
       .filter((i) => archivedIds.has(i.id))
       .forEach((issue) => {
         const statusId = issue.status.id;
         if (map.has(statusId)) map.get(statusId)!.push(issue);
       });
     return map;
-  }, [issues, visibleStatuses, archivedIds]);
+  }, [filteredIssues, visibleStatuses, archivedIds]);
 
   const archiveIssue = useCallback((id: number) => {
     setArchivedIds((prev) => {
@@ -1344,6 +1647,19 @@ export function KanbanBoard({
     const issue = issues?.find((i) => i.id === issueId);
     if (!issue) return;
 
+    // Em raias de frente, soltar noutra raia é dizer "esta tarefa é daquela frente".
+    // (Na raia "Sem frente" não: lá não há frente para fixar.)
+    const sep = overId.indexOf('__');
+    const targetLane = sep >= 0 ? overId.slice(sep + 2) : '';
+    if (
+      groupBy === 'frente' &&
+      targetLane &&
+      targetLane !== NO_FRENTE &&
+      targetLane !== (issue.frente?.id ?? NO_FRENTE)
+    ) {
+      setManualFrente.mutate({ issueId, frenteId: targetLane });
+    }
+
     if (issue.status.id === targetStatusId) return;
 
     // O card se move na hora via update otimista do hook (cache). Aqui só tratamos
@@ -1426,13 +1742,15 @@ export function KanbanBoard({
           )
           .join('\n')}
       `}</style>
-      {/* HEADER */}
-      <div className="flex items-center justify-between mb-3 flex-shrink-0 gap-3">
+      {/* HEADER — quebra linha em vez de cortar botões em telas estreitas */}
+      <div className="flex flex-wrap items-center justify-between mb-3 flex-shrink-0 gap-x-3 gap-y-2">
         <div className="flex items-center gap-2 min-w-0">
           <h1 className="text-lg font-semibold text-slate-800 whitespace-nowrap">
             Minhas Tarefas
             {userName && (
-              <span className="text-slate-400 font-normal ml-1 text-base">— {userName}</span>
+              <span className="hidden 2xl:inline text-slate-400 font-normal ml-1 text-base">
+                — {userName}
+              </span>
             )}
           </h1>
           <span
@@ -1450,7 +1768,7 @@ export function KanbanBoard({
           {activeFilterCount > 0 && (
             <button
               onClick={clearFilters}
-              title="Remover busca, prioridade, versão e alerta"
+              title="Remover busca, prioridade, versão, alerta e frente"
               className="flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors whitespace-nowrap"
             >
               <X size={11} />
@@ -1459,8 +1777,8 @@ export function KanbanBoard({
           )}
         </div>
 
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {/* Busca */}
+        <div className="flex flex-wrap items-center justify-end gap-2 min-w-0">
+          {/* Busca — estreita parada, abre ao focar ou com texto */}
           <div className="relative">
             <Search
               size={14}
@@ -1477,8 +1795,9 @@ export function KanbanBoard({
                   e.currentTarget.blur();
                 }
               }}
-              placeholder="Buscar nº, título ou projeto… (/)"
-              className="pl-8 pr-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent w-52 bg-white"
+              placeholder="Buscar… (/)"
+              title="Buscar por nº, título ou projeto (atalho: /)"
+              className={`pl-8 pr-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white transition-[width] duration-200 focus:w-56 ${search ? 'w-56' : 'w-36'}`}
             />
             {search && (
               <button
@@ -1508,34 +1827,6 @@ export function KanbanBoard({
             ))}
           </div>
 
-          {/* Mostrar/ocultar colunas de status fechado (ocultas por padrão) */}
-          {closedStatusOptions.map((s) => {
-            const shown = shownClosedStatuses.has(s.id);
-            return (
-              <button
-                key={s.id}
-                onClick={() =>
-                  setShownClosedStatuses((prev) => {
-                    const n = new Set(prev);
-                    if (shown) n.delete(s.id);
-                    else n.add(s.id);
-                    return n;
-                  })
-                }
-                title={shown ? `Ocultar coluna "${s.name}"` : `Mostrar coluna "${s.name}"`}
-                className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
-                  shown
-                    ? 'border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200'
-                    : 'border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-100'
-                }`}
-              >
-                {shown ? <EyeOff size={12} /> : <Eye size={12} />}
-                {shown ? 'Ocultar' : 'Mostrar'} "{s.name}"
-                <span className="text-slate-400">({s.count})</span>
-              </button>
-            );
-          })}
-
           <button
             onClick={() => refetch()}
             disabled={isFetching}
@@ -1545,20 +1836,66 @@ export function KanbanBoard({
             <RefreshCw size={16} className={isFetching ? 'animate-spin' : ''} />
           </button>
 
-          {/* Adicionar coluna vazia */}
+          {/* Colunas: status fechados, fixar coluna vazia e acompanhar */}
           <div className="relative">
             <button
               onClick={() => setShowAddColumn((v) => !v)}
-              title="Fixar coluna vazia no board"
-              className="flex items-center gap-1.5 px-2.5 py-1.5 border border-slate-200 hover:bg-slate-100 text-slate-600 text-sm font-medium rounded-lg transition-colors"
+              title="Colunas: mostrar fechadas, fixar vazias e acompanhar"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 border border-slate-200 hover:bg-slate-100 text-slate-600 text-xs font-medium rounded-lg transition-colors"
             >
-              <Columns size={15} />+ Coluna
+              <Columns size={13} />
+              Colunas
+              {shownClosedStatuses.size > 0 && (
+                <span
+                  title={`${shownClosedStatuses.size} coluna(s) de status fechado visível(is)`}
+                  className="text-[10px] font-semibold px-1.5 rounded-full bg-slate-200 text-slate-600"
+                >
+                  +{shownClosedStatuses.size}
+                </span>
+              )}
             </button>
             {showAddColumn && allStatuses && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setShowAddColumn(false)} />
-                <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 w-56 py-1 max-h-72 overflow-y-auto scrollbar-thin">
-                  <p className="px-3 py-1.5 text-xs text-slate-400 border-b border-slate-100">
+                <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 w-64 py-1 max-h-96 overflow-y-auto scrollbar-thin">
+                  {closedStatusOptions.length > 0 && (
+                    <>
+                      <p className="px-3 py-1.5 text-xs text-slate-400 border-b border-slate-100">
+                        Status fechados (ocultos por padrão)
+                      </p>
+                      {closedStatusOptions.map((s) => {
+                        const shown = shownClosedStatuses.has(s.id);
+                        return (
+                          <button
+                            key={`closed-${s.id}`}
+                            onClick={() =>
+                              setShownClosedStatuses((prev) => {
+                                const n = new Set(prev);
+                                if (shown) n.delete(s.id);
+                                else n.add(s.id);
+                                return n;
+                              })
+                            }
+                            aria-pressed={shown}
+                            className={`w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-slate-50 transition-colors ${shown ? 'text-slate-800 font-medium' : 'text-slate-600'}`}
+                          >
+                            <span className="flex items-center gap-1.5">
+                              {shown ? (
+                                <Eye size={12} />
+                              ) : (
+                                <EyeOff size={12} className="text-slate-300" />
+                              )}
+                              {s.name}
+                            </span>
+                            <span className="text-xs text-slate-400">{s.count}</span>
+                          </button>
+                        );
+                      })}
+                    </>
+                  )}
+                  <p
+                    className={`px-3 py-1.5 text-xs text-slate-400 border-b border-slate-100 ${closedStatusOptions.length > 0 ? 'pt-2.5 mt-1 border-t' : ''}`}
+                  >
                     Fixar coluna vazia no board
                   </p>
                   {allStatuses
@@ -1579,10 +1916,98 @@ export function KanbanBoard({
                         </button>
                       );
                     })}
+                  <p
+                    className="px-3 pt-2.5 pb-1.5 mt-1 text-xs text-slate-400 border-t border-slate-100"
+                    title="Tarefas ligadas a você mas atribuídas a outra pessoa (ex.: em revisão). Não podem ser arrastadas."
+                  >
+                    Acompanhar (com outra pessoa)
+                  </p>
+                  <div className="flex flex-wrap gap-1 px-3 pb-2 border-b border-slate-100">
+                    {FOLLOW_SOURCES.map((f) => {
+                      const on = followCfg.sources[f.id];
+                      return (
+                        <button
+                          key={f.id}
+                          onClick={() =>
+                            updateFollow((prev) => ({
+                              ...prev,
+                              hidden: false,
+                              sources: { ...prev.sources, [f.id]: !prev.sources[f.id] },
+                            }))
+                          }
+                          aria-pressed={on}
+                          className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${
+                            on
+                              ? 'border-violet-300 bg-violet-50 text-violet-700 font-medium'
+                              : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+                          }`}
+                        >
+                          {on ? '✓ ' : ''}
+                          {f.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {allStatuses
+                    .filter((s) => !s.is_closed)
+                    .map((s) => {
+                      const on = followCfg.all || followCfg.statusIds.includes(s.id);
+                      const n = followCountByStatus.get(s.id) ?? 0;
+                      return (
+                        <button
+                          key={`follow-${s.id}`}
+                          onClick={() => toggleFollowedStatus(s.id)}
+                          disabled={followCfg.all}
+                          className={`w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-violet-50 transition-colors disabled:cursor-default disabled:hover:bg-transparent ${on ? 'text-violet-600 font-medium' : 'text-slate-700'}`}
+                        >
+                          <span className="flex items-center gap-1.5">
+                            {on ? <Eye size={12} /> : <span className="w-3" />}
+                            {s.name}
+                          </span>
+                          {n > 0 && <span className="text-xs text-slate-400">{n}</span>}
+                        </button>
+                      );
+                    })}
+                  <button
+                    onClick={() =>
+                      updateFollow((prev) => ({ ...prev, all: !prev.all, hidden: false }))
+                    }
+                    className={`w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-violet-50 transition-colors border-t border-slate-100 ${followCfg.all ? 'text-violet-600 font-medium' : 'text-slate-700'}`}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      {followCfg.all ? <Eye size={12} /> : <span className="w-3" />}
+                      Todos os status
+                    </span>
+                    {followCandidates.length > 0 && (
+                      <span className="text-xs text-slate-400">{followCandidates.length}</span>
+                    )}
+                  </button>
                 </div>
               </>
             )}
           </div>
+
+          {/* Liga/desliga as acompanhadas sem perder a escolha de colunas */}
+          {hasFollowSetup(followCfg) && (
+            <button
+              onClick={() => updateFollow((prev) => ({ ...prev, hidden: !prev.hidden }))}
+              aria-pressed={!followCfg.hidden}
+              title={
+                followCfg.hidden
+                  ? 'Mostrar as tarefas acompanhadas (ligadas a você, com outra pessoa)'
+                  : 'Esconder as tarefas acompanhadas'
+              }
+              className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
+                followCfg.hidden
+                  ? 'border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-100'
+                  : 'border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100'
+              }`}
+            >
+              {followCfg.hidden ? <EyeOff size={12} /> : <Eye size={12} />}
+              Acompanhadas
+              <span className="opacity-70">({followedAvailable})</span>
+            </button>
+          )}
 
           {/* Modo seleção */}
           <button
@@ -1590,15 +2015,16 @@ export function KanbanBoard({
               setSelectionMode((v) => !v);
               clearSelection();
             }}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium rounded-lg transition-colors border ${
+            className={`flex items-center gap-1.5 text-sm font-medium rounded-lg transition-colors border ${selectionMode ? 'px-2.5 py-1.5' : 'p-2'} ${
               selectionMode
                 ? 'bg-blue-600 border-blue-600 text-white hover:bg-blue-700'
                 : 'border-slate-200 text-slate-600 hover:bg-slate-100'
             }`}
-            title="Selecionar várias tarefas"
+            title={selectionMode ? 'Sair do modo seleção' : 'Selecionar várias tarefas'}
+            aria-label={selectionMode ? 'Concluir seleção' : 'Selecionar várias tarefas'}
           >
             <CheckSquare size={15} />
-            {selectionMode ? 'Concluir' : 'Selecionar'}
+            {selectionMode && 'Concluir'}
           </button>
 
           {/* Filtro por versão/sprint (só aparece quando um projeto está selecionado) */}
@@ -1760,13 +2186,15 @@ export function KanbanBoard({
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setGroupOpen(false)} />
                 <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 py-1 w-48">
-                  {(['none', 'project', 'priority'] as GroupBy[]).map((g) => (
+                  {(['none', 'frente', 'project', 'priority'] as GroupBy[]).map((g) => (
                     <button
                       key={g}
                       onClick={() => changeGroupBy(g)}
                       className={`w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-blue-50 transition-colors ${groupBy === g ? 'text-blue-600 font-semibold' : 'text-slate-700'}`}
                     >
-                      {g === 'project' ? (
+                      {g === 'frente' ? (
+                        <Tags size={13} />
+                      ) : g === 'project' ? (
                         <FolderKanban size={13} />
                       ) : g === 'priority' ? (
                         <Flag size={13} />
@@ -1784,14 +2212,15 @@ export function KanbanBoard({
           <button
             onClick={toggleCompact}
             title={compactMode ? 'Desativar modo compacto' : 'Ativar modo compacto'}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium rounded-lg transition-colors border ${
+            aria-label="Modo compacto"
+            aria-pressed={compactMode}
+            className={`flex items-center gap-1.5 p-2 text-sm font-medium rounded-lg transition-colors border ${
               compactMode
                 ? 'bg-blue-100 border-blue-300 text-blue-700'
                 : 'border-slate-200 text-slate-600 hover:bg-slate-100'
             }`}
           >
             <Rows3 size={15} />
-            Compacto
           </button>
 
           <button
@@ -1810,6 +2239,98 @@ export function KanbanBoard({
         onApply={applyFilter}
       />
 
+      {/* Frentes: filtro por chip. "Todas" fica marcado quando nada está filtrado. */}
+      {(frenteStats.counts.size > 0 || frenteStats.none > 0) && (
+        <div
+          className="flex items-center gap-1.5 mb-3 flex-wrap"
+          role="group"
+          aria-label="Filtrar por frente"
+        >
+          <Tags size={13} className="text-slate-400 flex-shrink-0" />
+          <button
+            onClick={() => setFrenteFilter(new Set())}
+            aria-pressed={frenteFilter.size === 0}
+            className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+              frenteFilter.size === 0
+                ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900 border-transparent'
+                : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            Todas
+          </button>
+          {(frentesCfg?.frentes ?? [])
+            .filter((f) => !f.archived)
+            .map((f) => {
+              const n = frenteStats.counts.get(f.id) ?? 0;
+              const on = frenteFilter.has(f.id);
+              if (n === 0 && !on) return null;
+              return (
+                <button
+                  key={f.id}
+                  onClick={() => toggleFrenteFilter(f.id)}
+                  aria-pressed={on}
+                  title={
+                    f.hidden && !on
+                      ? `${f.name} está oculta do quadro. Clique para ver só ela.`
+                      : `Filtrar por ${f.name}`
+                  }
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                    on
+                      ? 'text-slate-800 dark:text-slate-100 border-transparent'
+                      : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                  style={
+                    on
+                      ? {
+                          backgroundColor: `${f.color}33`,
+                          boxShadow: `inset 0 0 0 1.5px ${f.color}`,
+                        }
+                      : undefined
+                  }
+                >
+                  <span
+                    className="w-2 h-2 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: f.color }}
+                  />
+                  {f.name}
+                  <span className="text-slate-400 dark:text-slate-500 tabular-nums">{n}</span>
+                  {f.hidden && <EyeOff size={11} className="text-slate-400" />}
+                </button>
+              );
+            })}
+          {frenteStats.none > 0 && (
+            <button
+              onClick={() => toggleFrenteFilter(NO_FRENTE)}
+              aria-pressed={frenteFilter.has(NO_FRENTE)}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                frenteFilter.has(NO_FRENTE)
+                  ? 'bg-amber-100 dark:bg-amber-900/30 border-amber-400 text-amber-800 dark:text-amber-200'
+                  : 'border-dashed border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20'
+              }`}
+            >
+              Sem frente
+              <span className="tabular-nums">{frenteStats.none}</span>
+            </button>
+          )}
+          <span className="flex-1" />
+          {frenteStats.none > 0 && (
+            <button
+              onClick={() => setShowTriage(true)}
+              className="text-xs font-medium text-amber-700 dark:text-amber-300 hover:underline"
+            >
+              Classificar {frenteStats.none}
+            </button>
+          )}
+          <button
+            onClick={openFrenteSettings}
+            title="Frentes e regras de classificação"
+            className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+          >
+            <Settings2 size={12} /> Gerenciar frentes
+          </button>
+        </div>
+      )}
+
       {/* Banner de sprint (só quando versão está selecionada) */}
       {selectedVersionId &&
         versions &&
@@ -1817,7 +2338,7 @@ export function KanbanBoard({
           const version = versions.find((v) => v.id === selectedVersionId);
           if (!version) return null;
           const total = versionIssues?.length ?? 0;
-          const closed = versionIssues?.filter((i) => i.status.is_closed).length ?? 0;
+          const closed = versionIssues?.filter(isClosedIssue).length ?? 0;
           const myTotal = filteredIssues.length;
           return (
             <SprintSummary version={version} total={total} closed={closed} myTotal={myTotal} />
@@ -1826,7 +2347,7 @@ export function KanbanBoard({
 
       {/* Stats / alertas clicáveis */}
       {issues && (
-        <StatsBar issues={issues} activeFilter={activeFilter} onFilter={setActiveFilter} />
+        <StatsBar issues={statsIssues} activeFilter={activeFilter} onFilter={setActiveFilter} />
       )}
 
       {/* A busca bateu na trava do servidor: melhor dizer do que sumir calado */}
@@ -1865,52 +2386,81 @@ export function KanbanBoard({
             {lanes.map((lane) => (
               <div key={lane.key} className="flex-shrink-0">
                 <div className="flex items-center gap-2 mb-2 sticky left-0">
-                  {groupBy === 'project' ? (
-                    <FolderKanban size={14} className="text-violet-500" />
-                  ) : (
-                    <Flag size={14} className="text-violet-500" />
-                  )}
-                  <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                    {lane.label}
-                  </h3>
-                  <span className="text-xs font-medium text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
-                    {lane.count}
-                  </span>
-                </div>
-                <SortableContext
-                  items={visibleStatuses.map((s) => `col-${s.id}__${lane.key}`)}
-                  strategy={horizontalListSortingStrategy}
-                >
-                  <div className="flex gap-4 items-start overflow-x-auto pb-2 scrollbar-thin">
-                    {visibleStatuses.map((status) => (
-                      <KanbanColumn
-                        key={`${status.id}__${lane.key}`}
-                        dndId={`col-${status.id}__${lane.key}`}
-                        draggableColumn={false}
-                        status={status}
-                        issues={lane.byStatus.get(status.id) ?? []}
-                        archivedIssues={[]}
-                        onIssueClick={handleCardClick}
-                        statuses={statusesForCards}
-                        onQuickStatusChange={handleQuickStatusChange}
-                        onArchive={archiveIssue}
-                        onUnarchive={unarchiveIssue}
-                        selectedIds={selectedIds}
-                        selectionMode={selectionMode}
-                        onToggleSelect={toggleSelect}
-                        focusedIssueId={focusedIssueId}
-                        compactMode={compactMode}
-                        onSubtaskOpen={onIssueClick}
-                        onSubtaskDone={handleSubtaskDone}
-                        activeTimerIssueId={timer.activeIssueId}
-                        timerFormatted={timer.formatted}
-                        onTimerStart={timer.start}
-                        onTimerStop={handleTimerStop}
-                        customColorKey={columnColors[status.id]}
+                  <button
+                    onClick={() => toggleLane(`${groupBy}:${lane.key}`)}
+                    aria-expanded={!isLaneCollapsed(lane.key)}
+                    title={isLaneCollapsed(lane.key) ? 'Expandir raia' : 'Recolher raia'}
+                    className="flex items-center gap-2 rounded-md -ml-1 px-1 py-0.5 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-colors"
+                  >
+                    <ChevronDown
+                      size={14}
+                      className={`text-slate-400 transition-transform ${isLaneCollapsed(lane.key) ? '-rotate-90' : ''}`}
+                    />
+                    {groupBy === 'frente' ? (
+                      <span
+                        className="w-3 h-3 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: lane.color ?? '#94a3b8' }}
                       />
-                    ))}
-                  </div>
-                </SortableContext>
+                    ) : groupBy === 'project' ? (
+                      <FolderKanban size={14} className="text-violet-500" />
+                    ) : (
+                      <Flag size={14} className="text-violet-500" />
+                    )}
+                    <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                      {lane.label}
+                    </h3>
+                    <span className="text-xs font-medium text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
+                      {lane.count}
+                    </span>
+                  </button>
+                  {groupBy === 'frente' && lane.key === NO_FRENTE && lane.count > 0 && (
+                    <button
+                      onClick={() => setShowTriage(true)}
+                      className="text-xs font-medium text-amber-700 dark:text-amber-300 hover:underline"
+                    >
+                      Classificar
+                    </button>
+                  )}
+                </div>
+                {!isLaneCollapsed(lane.key) && (
+                  <SortableContext
+                    items={visibleStatuses.map((s) => `col-${s.id}__${lane.key}`)}
+                    strategy={horizontalListSortingStrategy}
+                  >
+                    <div className="flex gap-4 items-start overflow-x-auto pb-2 scrollbar-thin">
+                      {visibleStatuses.map((status) => (
+                        <KanbanColumn
+                          key={`${status.id}__${lane.key}`}
+                          dndId={`col-${status.id}__${lane.key}`}
+                          draggableColumn={false}
+                          status={status}
+                          issues={lane.byStatus.get(status.id) ?? []}
+                          archivedIssues={lane.archivedByStatus.get(status.id) ?? []}
+                          followedIssues={lane.followedByStatus.get(status.id)}
+                          followReasons={followReasons}
+                          onIssueClick={handleCardClick}
+                          statuses={statusesForCards}
+                          onQuickStatusChange={handleQuickStatusChange}
+                          onArchive={archiveIssue}
+                          onUnarchive={unarchiveIssue}
+                          selectedIds={selectedIds}
+                          selectionMode={selectionMode}
+                          onToggleSelect={toggleSelect}
+                          focusedIssueId={focusedIssueId}
+                          compactMode={compactMode}
+                          showFrente={groupBy !== 'frente'}
+                          onSubtaskOpen={onIssueClick}
+                          onSubtaskDone={handleSubtaskDone}
+                          activeTimerIssueId={timer.activeIssueId}
+                          timerFormatted={timer.formatted}
+                          onTimerStart={timer.start}
+                          onTimerStop={handleTimerStop}
+                          customColorKey={columnColors[status.id]}
+                        />
+                      ))}
+                    </div>
+                  </SortableContext>
+                )}
               </div>
             ))}
           </div>
@@ -1930,6 +2480,8 @@ export function KanbanBoard({
                   status={status}
                   issues={issuesByStatus.get(status.id) ?? []}
                   archivedIssues={archivedByStatus.get(status.id) ?? []}
+                  followedIssues={followedByStatus.get(status.id)}
+                  followReasons={followReasons}
                   onIssueClick={handleCardClick}
                   statuses={statusesForCards}
                   onQuickStatusChange={handleQuickStatusChange}
@@ -1942,6 +2494,7 @@ export function KanbanBoard({
                   onUnpin={() => togglePinnedStatus(status.id)}
                   focusedIssueId={focusedIssueId}
                   compactMode={compactMode}
+                  showFrente
                   onSubtaskOpen={onIssueClick}
                   onSubtaskDone={handleSubtaskDone}
                   activeTimerIssueId={timer.activeIssueId}
@@ -2020,6 +2573,20 @@ export function KanbanBoard({
       )}
 
       <Suspense fallback={null}>
+        {showTriage && (
+          <FrenteTriageModal
+            issues={(issues ?? []).filter((i) => !archivedIds.has(i.id))}
+            onOpenRules={() => {
+              setShowTriage(false);
+              openFrenteSettings();
+            }}
+            onClose={() => setShowTriage(false)}
+            onOpenIssue={(id) => {
+              setShowTriage(false);
+              onIssueClick(id);
+            }}
+          />
+        )}
         {showCreate && (
           <CreateIssueModal
             onClose={() => setShowCreate(false)}

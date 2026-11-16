@@ -26,6 +26,8 @@ const REDMINE_CF = {
   versionNote: int('RM_CF_VERSION_NOTE', 213), // Nota de versão
   forecast: int('RM_CF_FORECAST', 228), // Previsão revisão
   impact: int('RM_CF_IMPACT', 229), // Impacto (módulos)
+  area: int('RM_CF_AREA', 111), // DEV/SUP Área (módulo do produto) — base das frentes
+  nature: int('RM_CF_NATURE', 113), // DEV/SUP Natureza (Defeito, Melhoria, Projeto…)
 };
 
 // ── Status do Redmine (status_id) ───────────────────────────────────────────

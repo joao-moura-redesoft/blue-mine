@@ -308,13 +308,18 @@ export const redmineApi = {
     return data.user;
   },
 
-  getMonitoredIssues: async (): Promise<Issue[]> => {
-    const { data } = await api.get('/issues/monitored');
+  // projectId: recorte do board (o Redmine inclui os subprojetos).
+  getMonitoredIssues: async (projectId?: number): Promise<Issue[]> => {
+    const { data } = await api.get('/issues/monitored', {
+      params: projectId ? { project_id: projectId } : undefined,
+    });
     return data.issues;
   },
 
-  getAuthoredIssues: async (): Promise<Issue[]> => {
-    const { data } = await api.get('/issues/authored');
+  getAuthoredIssues: async (projectId?: number): Promise<Issue[]> => {
+    const { data } = await api.get('/issues/authored', {
+      params: projectId ? { project_id: projectId } : undefined,
+    });
     return data.issues;
   },
 
@@ -335,10 +340,10 @@ export const redmineApi = {
     return data.issues;
   },
 
-  getIssuesByIds: async (ids: number[]): Promise<Issue[]> => {
+  getIssuesByIds: async (ids: number[], projectId?: number): Promise<Issue[]> => {
     if (!ids.length) return [];
     const { data } = await api.get('/issues/by-ids', {
-      params: { ids: ids.join(',') },
+      params: { ids: ids.join(','), ...(projectId ? { project_id: projectId } : {}) },
     });
     return data.issues;
   },

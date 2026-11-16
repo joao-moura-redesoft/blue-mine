@@ -29,8 +29,18 @@ function safeNetworkMessage(err) {
 // uma senha que não existe mais. Derrubar a sessão força um login limpo.
 // Só dispara com `credentialsStale`, marcado exclusivamente em falha de
 // AUTENTICAÇÃO (401) — nunca em 403, que é rotina com a key não-admin.
+//
+// E só quando a senha vencida é a DA SESSÃO (modo usuário/senha; o authMiddleware
+// a injeta em x-redmine-pass). Em modo Token API a sessão não guarda senha: o
+// e-mail usa a senha do AD do cofre, e a recusa dela pelo Zimbra derrubava a
+// sessão do Redmine — que não tem nada de vencido — segundos após cada login,
+// num laço sem saída (entrar de novo não conserta a senha do cofre).
 function shouldDropStaleSession(err, req) {
-  return !!(err && err.credentialsStale) && !!(req && req.cookies && req.cookies.session_id);
+  return (
+    !!(err && err.credentialsStale) &&
+    !!(req && req.cookies && req.cookies.session_id) &&
+    !!(req.headers && req.headers['x-redmine-pass'])
+  );
 }
 
 function dropStaleSession(err, req, res) {
