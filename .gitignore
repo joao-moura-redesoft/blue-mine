@@ -183,6 +183,7 @@ database.db
 notes.json
 boards.json
 sprints.json
+frentes.json
 events.json
 workflows.json
 workflow-state.json

@@ -28,8 +28,15 @@ export function extractIssueRefs(md: string): number[] {
   return ids;
 }
 
+// O chip entra no Markdown ANTES do parse: quebra de linha no atributo racha a
+// linha da tabela (e o <a> vira texto), e "|" racha a célula. Vão como entidade.
 const escAttr = (s: string) =>
-  s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  s
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/\r?\n/g, '&#10;')
+    .replace(/\|/g, '&#124;');
 
 /**
  * #92313 → chip clicável (ponto de status + tooltip). O clique é tratado por

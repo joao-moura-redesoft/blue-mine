@@ -19,6 +19,7 @@ const ALERT_LABELS: Record<string, string> = {
 const GROUP_LABELS: Record<string, string> = {
   project: 'Por projeto',
   priority: 'Por prioridade',
+  frente: 'Por frente',
 };
 
 interface CurrentFilter {
@@ -26,7 +27,7 @@ interface CurrentFilter {
   sortBy: 'priority' | 'due_date' | 'updated';
   priorityFilter: string;
   alertFilter: string | null;
-  groupBy: 'none' | 'project' | 'priority';
+  groupBy: 'none' | 'project' | 'priority' | 'frente';
 }
 
 interface Props {

@@ -6,7 +6,7 @@ export interface SavedFilter {
   priorityFilter: string;
   alertFilter: string | null;
   // Opcional: filtros salvos antes desse campo existir continuam válidos ('none').
-  groupBy?: 'none' | 'project' | 'priority';
+  groupBy?: 'none' | 'project' | 'priority' | 'frente';
 }
 
 const LS_KEY = 'kanban-saved-filters';

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { ConfirmDialog } from './workflow/ConfirmDialog';
+import { FrentesSettings } from './frentes/FrentesSettings';
 import {
   X,
   KeyRound,
@@ -18,6 +19,7 @@ import {
   Shield,
   RefreshCw,
   Lock,
+  Layers,
 } from 'lucide-react';
 import { useTalkRedmineMatch, useRefreshTalkRedmineMatch } from '../hooks/useTalk';
 import {
@@ -40,6 +42,8 @@ import { appDefaults, LOCKED_HINT, dokuwikiHost } from '../utils/appDefaults';
 
 interface Props {
   onClose: () => void;
+  /** Aba aberta de início (ex.: 'frentes', vindo do quadro). */
+  initialTab?: 'corporativo' | 'chat' | 'ia' | 'frentes';
 }
 
 interface ProviderConfig {
@@ -1043,17 +1047,18 @@ function WikiSection() {
   );
 }
 
-type SettingsTab = 'corporativo' | 'chat' | 'ia';
+type SettingsTab = 'corporativo' | 'chat' | 'ia' | 'frentes';
 
 const TABS: { id: SettingsTab; label: string; icon: typeof Shield }[] = [
   { id: 'corporativo', label: 'Corporativo', icon: Shield },
   { id: 'chat', label: 'Chat', icon: MessageSquare },
   { id: 'ia', label: 'IA', icon: Sparkles },
+  { id: 'frentes', label: 'Frentes', icon: Layers },
 ];
 
-export function SettingsModal({ onClose }: Props) {
+export function SettingsModal({ onClose, initialTab = 'corporativo' }: Props) {
   const active = getActiveAIProvider();
-  const [tab, setTab] = useState<SettingsTab>('corporativo');
+  const [tab, setTab] = useState<SettingsTab>(initialTab);
 
   return (
     <div
@@ -1061,7 +1066,7 @@ export function SettingsModal({ onClose }: Props) {
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md max-h-[85vh] flex flex-col bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden"
+        className={`w-full ${tab === 'frentes' ? 'max-w-2xl' : 'max-w-md'} max-h-[85vh] flex flex-col bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header (fixo) */}
@@ -1148,6 +1153,8 @@ export function SettingsModal({ onClose }: Props) {
               <NextcloudSection />
             </div>
           )}
+
+          {tab === 'frentes' && <FrentesSettings />}
 
           {tab === 'ia' && (
             <div className="space-y-3">

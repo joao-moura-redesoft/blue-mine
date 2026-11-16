@@ -55,6 +55,16 @@ describe('linkIssueRefs', () => {
     expect(html).not.toContain('<script>');
   });
 
+  it('chip dentro de tabela não racha a linha nem a célula', () => {
+    const html = linkIssueRefs(
+      '| #93099 | x |',
+      new Map([[93099, info({ subject: 'A | B' })]]),
+    );
+    expect(html).not.toContain('\n');
+    expect(html.split('|').length).toBe(4); // só os 3 pipes da tabela
+    expect(html).toContain('&#10;');
+  });
+
   it('não mexe em código nem em link markdown', () => {
     const byId = new Map([[93099, info()]]);
     expect(linkIssueRefs('`#93099`', byId)).toBe('`#93099`');

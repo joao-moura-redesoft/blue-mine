@@ -19,7 +19,16 @@ function mockRes() {
   return res;
 }
 const req = { method: 'GET', path: '/api/x' };
-const reqLogged = { ...req, cookies: { session_id: 'sess-1' } };
+const reqLogged = {
+  ...req,
+  cookies: { session_id: 'sess-1' },
+  headers: { 'x-redmine-user': 'joao', 'x-redmine-pass': 'velha' },
+};
+const reqLoggedKey = {
+  ...req,
+  cookies: { session_id: 'sess-2' },
+  headers: { 'x-redmine-key': 'abc' },
+};
 
 describe('errorMiddleware', () => {
   it('repassa mensagem de AppError (isSafe)', () => {
@@ -78,6 +87,10 @@ describe('errorMiddleware', () => {
 
     it('derruba quando a credencial foi marcada como vencida', () => {
       expect(shouldDropStaleSession(stale(), reqLogged)).toBe(true);
+    });
+
+    it('NÃO derruba sessão de Token API — a senha vencida é a do cofre (e-mail), não a da sessão', () => {
+      expect(shouldDropStaleSession(stale(), reqLoggedKey)).toBe(false);
     });
 
     it('NÃO derruba num 403 comum — key não-admin toma 403 em rotas legítimas', () => {

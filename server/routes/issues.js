@@ -17,6 +17,8 @@ const { REDMINE_CF, REDMINE_STATUS } = require('../lib/config');
 const { sanitizeIssueBody, toLatin1Safe } = require('../lib/latin1');
 const { getInternalCaAgent } = require('../lib/internalCa');
 const issueEvents = require('../services/issueEvents');
+const { annotateIssues } = require('../lib/frentes');
+const frentesStore = require('../services/frentesStore');
 
 // Filtros nomeados por campo custom, resolvidos pela config central (env-overridable).
 const CF_DEVELOPER = `cf_${REDMINE_CF.developer}`;
@@ -84,6 +86,19 @@ function myIssuesQueries(base, nowMs = Date.now(), closedDays = CLOSED_DAYS, sta
   return [open, { ...base, status_id: 'closed', updated_on: `>=${since}` }];
 }
 
+// Anexa a frente (calculada pelas regras do usuário) a cada tarefa. É um
+// enfeite: se a configuração não puder ser lida, as tarefas seguem sem frente
+// em vez de a tela inteira falhar.
+async function withFrentes(req, issues, opts) {
+  try {
+    const uid = await getMyUserId(req);
+    return annotateIssues(issues, frentesStore.getConfig(uid), opts);
+  } catch (err) {
+    console.warn('[frentes] classificação indisponível:', err.message);
+    return issues;
+  }
+}
+
 // Minhas issues
 router.get(
   '/issues',
@@ -99,7 +114,10 @@ router.get(
         fetchAllIssuesMeta(redmine, params),
       ),
     );
-    const issues = results.flatMap((r) => r.issues);
+    const issues = await withFrentes(
+      req,
+      results.flatMap((r) => r.issues),
+    );
     res.json({
       issues,
       total_count: issues.length,
@@ -109,13 +127,27 @@ router.get(
   }),
 );
 
+// Recorte por projeto pedido pelo board (colunas acompanhadas com projeto
+// escolhido). Vai para o Redmine, que já inclui os SUBPROJETOS no `project_id` —
+// o cliente não tem a árvore de projetos (o /projects.json falha aqui e o
+// fallback por memberships não traz o pai). Só id numérico ou identificador.
+function projectScope(req) {
+  const p = String(req.query.project_id ?? '').trim();
+  return /^[\w-]{1,100}$/.test(p) ? { project_id: p } : {};
+}
+
 // Tarefas por ID (para "Observadas" locais) — sem filtro de responsável, qualquer tarefa visível
 router.get(
   '/issues/by-ids',
   handle(async (req, res) => {
     const ids = String(req.query.ids || '').trim();
     if (!ids) return res.json({ issues: [], total_count: 0 });
-    const issues = await fetchAllIssues(makeRedmine(req), { issue_id: ids, status_id: '*' });
+    const all = await fetchAllIssues(makeRedmine(req), {
+      issue_id: ids,
+      status_id: '*',
+      ...projectScope(req),
+    });
+    const issues = await withFrentes(req, all);
     res.json({ issues, total_count: issues.length });
   }),
 );
@@ -128,8 +160,14 @@ router.get(
     const all = await fetchAllIssues(makeRedmine(req), {
       [CF_DEVELOPER]: userId,
       status_id: 'open',
+      ...projectScope(req),
     });
-    const issues = all.filter((i) => !i.assigned_to || String(i.assigned_to.id) !== String(userId));
+    // Com frente: o board mostra estas tarefas como "acompanhadas" nas próprias
+    // raias, e sem a anotação todas cairiam em "Sem frente".
+    const issues = await withFrentes(
+      req,
+      all.filter((i) => !i.assigned_to || String(i.assigned_to.id) !== String(userId)),
+    );
     res.json({ issues, total_count: issues.length });
   }),
 );
@@ -138,7 +176,12 @@ router.get(
 router.get(
   '/issues/authored',
   handle(async (req, res) => {
-    const issues = await fetchAllIssues(makeRedmine(req), { author_id: 'me', status_id: 'open' });
+    const all = await fetchAllIssues(makeRedmine(req), {
+      author_id: 'me',
+      status_id: 'open',
+      ...projectScope(req),
+    });
+    const issues = await withFrentes(req, all);
     res.json({ issues, total_count: issues.length });
   }),
 );
@@ -451,6 +494,7 @@ router.get(
     const { data } = await makeRedmine(req).get(`/issues/${req.params.id}.json`, {
       params: { include: 'journals,attachments,relations,children,watchers,allowed_statuses' },
     });
+    if (data?.issue) data.issue = (await withFrentes(req, [data.issue], { withAlso: true }))[0];
     res.json(data);
   }),
 );
@@ -549,4 +593,4 @@ router.get(
 );
 
 module.exports = router;
-module.exports.__testables = { mentionCandidateQueries, myIssuesQueries };
+module.exports.__testables = { mentionCandidateQueries, myIssuesQueries, projectScope };

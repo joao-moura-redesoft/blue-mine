@@ -534,6 +534,18 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const { permission: notifPermission, requestPermission } = useBrowserNotifications();
 
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'corporativo' | 'frentes'>('corporativo');
+
+  // Telas internas (ex.: o quadro) pedem as Configurações numa aba específica.
+  useEffect(() => {
+    const open = (e: Event) => {
+      const tab = (e as CustomEvent<{ tab?: 'frentes' }>).detail?.tab;
+      setSettingsTab(tab ?? 'corporativo');
+      setShowSettings(true);
+    };
+    window.addEventListener('bluemine:open-settings', open);
+    return () => window.removeEventListener('bluemine:open-settings', open);
+  }, []);
   const [showStandup, setShowStandup] = useState(false);
   const [showDigest, setShowDigest] = useState(false);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
@@ -1536,7 +1548,15 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         )}
 
         <UpdateBanner />
-        {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+        {showSettings && (
+          <SettingsModal
+            onClose={() => {
+              setShowSettings(false);
+              setSettingsTab('corporativo'); // as outras entradas abrem na aba padrão
+            }}
+            initialTab={settingsTab}
+          />
+        )}
 
         {showStandup && (
           <StandupModal

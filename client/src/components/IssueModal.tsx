@@ -40,8 +40,10 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Ban,
+  Tags,
 } from 'lucide-react';
 import type { Attachment, EditField, Issue, IssueStatus } from '../types/redmine';
+import { FrenteField } from './frentes/FrenteField';
 import { looksClosed, type IssueRefInfo } from '../utils/issueStatus';
 import { parseBlockers } from '../utils/blockers';
 import { useIssueRefs } from '../hooks/useIssueRefs';
@@ -2781,6 +2783,9 @@ export function IssueModal({
                           />
                         )}
                       </div>
+                    </FieldRow>
+                    <FieldRow icon={<Tags size={14} />} label="Frente">
+                      <FrenteField issue={issue} />
                     </FieldRow>
                     <FieldRow icon={<Clock size={14} />} label="Tempo estimado">
                       <HoursField
